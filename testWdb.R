@@ -2,8 +2,7 @@ foundAvailable<-FALSE
 
 findAvailableModels<-function(){
  # returns vector of available models
- # query<-"SELECT dataprovidername FROM wci.browse( NULL::wci.browsedataprovider )"
-  query<-"SELECT distinct(dataprovidername) FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"
+ query<-"SELECT dataprovidername FROM wci.browse( NULL::wci.browsedataprovider )"
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -18,8 +17,7 @@ findAvailableModels<-function(){
 
 findAvailableParameters<-function(){
  # returns vector of available models
- # query<-"SELECT valueparametername FROM wci.browse( NULL::wci.browsevalueparameter )"
-  query<-"SELECT distinct(valueparametername) FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"
+  query<-"SELECT valueparametername FROM wci.browse( NULL::wci.browsevalueparameter )"
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -34,7 +32,7 @@ findAvailableParameters<-function(){
 
 findAvailablePlaces<-function(){
  # returns vector of available places
-   query<-"SELECT distinct(placename) FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"
+  query<-"SELECT placename FROM wci.browse( NULL::wci.browseplace )"
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -48,7 +46,7 @@ findAvailablePlaces<-function(){
 
 findAvailableReferencetimes<-function(){
  # returns vector of available reftimes
-   query<-"SELECT distinct(to_char(referencetime,'YYYYMMDDHH12')) as time FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"
+   query<-"SELECT distinct(to_char(referencetime,'YYYYMMDDHH24')) as time FROM wci.browse( NULL::wci.browsereferencetime)"
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -57,7 +55,6 @@ findAvailableReferencetimes<-function(){
     vreftimes[i]<-results$time[i]
   }
   vreftimes<-sort(vreftimes)
-#      vreftimes<-as.POSIXlt(vreftimes,origin="1970-01-01")
   return(vreftimes)
 
 }
@@ -65,7 +62,7 @@ findAvailableReferencetimes<-function(){
 
 findAvailableProglengths<-function(){
  # returns vector of available progtimes
-   query<-"SELECT distinct(EXTRACT(HOUR FROM (validtimeto - referencetime)) + ( EXTRACT(DAY FROM (validtimeto - referencetime) )*24 )  ) as prog FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"
+   query<-"SELECT distinct(wci.prognosishour(referencetime, validtimefrom)) as prog FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"   
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -94,9 +91,10 @@ findAvailable<-function(){
 
 
 #get everything from database or number of weeks etc
-testLatency<-function(nplaces,nweeks,nmodels,nparams,nprogs){
+testPerformance<-function(nplaces=NULL,nweeks=NULL,nmodels=NULL,nparams=NULL,nprogs=NULL,testLatency=TRUE,testMemory=TRUE){
   if (!foundAvailable)
     findAvailable()
+  #find models, places, params etc. to look for from what's available
   models<-getSelectedVector(nmodels,availableModels)
   places<-getSelectedVector(nplaces,availablePlaces)
   params<-getSelectedVector(nparams,availableParams)
@@ -111,27 +109,35 @@ testLatency<-function(nplaces,nweeks,nmodels,nparams,nprogs){
     newtime<-strptime(allreftimes[1],"%Y%m%d%H")+tdiff
     reftimes[2]<-format(newtime,"%Y%m%d%H")
   }
-  timeReadVerif<-system.time(mydf<-readVerifWdb(places,reftimes,models,params,progs))
-  cat("========= Test latency readVerifWdb ================ \n")
-
-  cat("Time in seconds to read data(readVerifWdb), user:",  timeReadVerif[1],"system:",timeReadVerif[2], "elapsed:", timeReadVerif[3],"\n")
+  timeReadVerif<-system.time(mydf<-readVerifWdb(places,reftimes,models,params,progs,testLatency,testMemory))
+  cat("========= Test performance readVerifWdb ================ \n")
+  if (testLatency){
+    cat("Time in seconds to read data(readVerifWdb), user:",  timeReadVerif[1],"system:",timeReadVerif[2], "elapsed:", timeReadVerif[3],"\n")
+  }
+  if (testMemory){
+    cat("Max total memory used(readVerifWdb):", maxmemory,"bytes \n")
+  }
+  # Check places, progs and reftimes actually found
+  selectedPlaces<-levels(factor(mydf$wmo_no))
+  selectedProgs<-levels(factor(mydf$prog))
+  selectedReftimes<-levels(factor(mydf$time))
   cat("Number of rows in resulting dataframe:", nrow(mydf),"\n")
   cat("Number of columns in resulting dataframe:", ncol(mydf),"\n")
   cat("Names of columns in resulting dataframe:",names(mydf),"\n")
-  cat("Number of places selected:",length(places),"\n")
+  cat("Number of places selected:",length(selectedPlaces),"\n")
   cat("Number of models selected:",length(models),"\n")
   cat("Number of parameters selected:",length(params),"\n")
-  cat("Number of proglengths selected:",length(progs),"\n")
+  cat("Number of proglengths selected:",length(selectedProgs),"\n")
+  cat("Number of referencetimes selected:",length(selectedReftimes),"\n")
 
-  cat("Selected places:",places,"\n") 
-  cat("Selected referencetimes:", reftimes[1],"to", reftimes[2],"\n")
+  cat("Selected places:",selectedPlaces,"\n") 
+  cat("Selected referencetimes:", selectedReftimes,"\n")
   cat("Selected models:",models,"\n")
   cat("Selected parameters:",params,"\n")
-  cat("Selected proglengths:",progs,"\n")
+  cat("Selected proglengths:",selectedProgs,"\n")
 
   return(mydf)
-  
-# 
+   
 
 }
 
@@ -146,3 +152,5 @@ getSelectedVector<-function(nEntries,availableVector){
   
   return(selectedVector)
 }
+
+

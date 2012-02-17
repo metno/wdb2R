@@ -14,7 +14,11 @@
 # more calls to readVerifWdb
 # ....
 # close connecion when finished
-#
+# finish()
+
+library(DBI,lib.loc="/home/helenk/local/lib/R")
+library(RPostgreSQL,lib.loc="/home/helenk/local/lib/R")
+
 
 startup<-function(db){
  #startup; load driver, connect to wdb etc
@@ -36,11 +40,11 @@ finish<-function(){
 }
 
 
-readVerifWdb<-function(wmo_no,period,models,parameters,prg){
+readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,testLatency=false){
 
-  queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimeto,'YYYYMMDDHH12') as TIME, ( EXTRACT(HOUR FROM (validtimeto - referencetime)) + ( EXTRACT(DAY FROM (validtimeto - referencetime) )*24 ) ) AS prog"
+  queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
 
-  
+  maxmemory<<-0
   #create empty data frame to hold all models
   allmodels<-data.frame()
 # loop over models
@@ -73,22 +77,59 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg){
  
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
-      #cat(query,"\n") 
-      rs <- dbSendQuery(con, query)
-      results<-fetch(rs,n=-1)
+ 
+      cat(query,"\n") 
+      if (testLatency){
+        ts<-system.time(rs <- dbSendQuery(con, query))
+        tr<-system.time(results<-fetch(rs,n=-1))
+        cat("Time for rs <- dbSendQuery(con, query)\n")
+        print(ts)
+        cat("Time for results<-fetch(rs,n=-1)\n")
+        print(tr)
+      }
+      else{
+        rs <- dbSendQuery(con, query)
+        results<-fetch(rs,n=-1)
+      }
+
+      cat("Number of rows in results", nrow(results),"\n")
+      cat("Size of results", object.size(results),"bytes \n")
+
       dbClearResult(rs)
 
+      
       if (nrow(allmodels)==0){      
         allmodels<-results
       }
       else{
-        allmodels<-merge(allmodels,results)
+        if (testLatency){
+          tm<-system.time(allmodels<-merge(allmodels,results))
+          cat("Time for allmodels<-merge(allmodels,results) \n")
+          print(tm)
+        }
+        else
+          allmodels<-merge(allmodels,results)
       }
+
+
+      #monitor memory usage
+      if (testMemory){
+        myobj<-sort( sapply(ls(),function(x){object.size(get(x))}), decreasing=TRUE)
+        totalmem<-sum(myobj)
+        cat("Total memory", totalmem,"bytes \n")
+        myobj<-head(myobj,5)
+        cat("5 largest objects:\n")
+        print(myobj)
+        if (totalmem > maxmemory)
+          maxmemory<<-totalmem
+      }
+      
+      
     }
  
   }
-  
 
+  
   return(allmodels)
   
   
@@ -130,8 +171,8 @@ names(parameters)<-prm
 names(prm)<-parameters
 
 # Mapping from miopdb model name to proffdb dataprovider name
-dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast")
-models<-c("DEF","APP","RAW","H12","LOC")
+dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast","h8","um4")
+models<-c("DEF","APP","RAW","H12","LOC","H8","UM4")
 names(dataproviders)<-models
 names(models)<-dataproviders
 
