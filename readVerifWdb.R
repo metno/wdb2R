@@ -16,9 +16,8 @@
 # close connecion when finished
 # finish()
 
-library(DBI,lib.loc="/home/helenk/local/lib/R")
-library(RPostgreSQL,lib.loc="/home/helenk/local/lib/R")
-
+library(DBI,lib)
+library(RPostgreSQL)
 
 startup<-function(db){
  #startup; load driver, connect to wdb etc
