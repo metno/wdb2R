@@ -16,7 +16,7 @@
 # close connecion when finished
 # finish()
 
-library(DBI,lib)
+library(DBI)
 library(RPostgreSQL)
 
 startup<-function(db){
