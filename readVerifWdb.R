@@ -24,7 +24,7 @@ startup<-function(db){
   drv<<-dbDriver("PostgreSQL")
   if (db=="dev3"){
     con<<-dbConnect(drv,  dbname="wdb",  user="wdb", host="wdb-dev3")
-    rs<-suppressWarnings(dbSendQuery(con,"select wci.begin('wdb')"))
+    rs<-suppressWarnings(dbSendQuery(con,"select wci.begin('wdb',88,123,88)"))
   }
   dbClearResult(rs)
  }
@@ -60,19 +60,17 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,test
       reftimeString<-getInsideTimeString(period)
       validtimeString<-"NULL"
       parameterString<-getParameterString(par)
-      levelString<-"NULL"
-      dataProviderString<-"ARRAY[-1]"
+      levelString<-"NULL" #should be possible to select level?
+      versionString<-"NULL"
       returnString<-"NULL::wci.returnfloat))"
       whereString<-"AS wciquery where("
       stationString<-paste("WMO_NO in('",paste(wmo_no,collapse="','"),"')",sep="")      
       progString<-paste("AND PROG in(",paste(prg,collapse=","),") )",sep="")      
-
-
+      
       parmodel<-paste("\"", paste(par,model,sep=".")  ,"\"",sep="")
       queryPart2<- paste(",value as",parmodel, "from wci.read(")
-      queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,dataProviderString,returnString,sep=",")
+      queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
       queryPart4<-paste(whereString,stationString,progString)
-
  
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
@@ -129,10 +127,106 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,test
   }
 
   
-  return(allmodels)
-  
-  
+  return(allmodels)  
 }
+
+
+readEnsembleWdb<-function(wmo_no,period,parameters,models,prg,members=NULL){
+  # example call
+  # readEnsembleWdb(wmo_no=c(10380,98790),period=c(20120310,20120312),models=c("EPS"),parameters=c("TT"),prg=c(12,18))->mydf
+  # readEnsembleWdb(wmo_no=c(18700),period=c(20120310,20120312),models=c("EPS"),parameters=c("TCC"),prg=c(12),members=c(0:10))-> mydf
+  
+  # selection of ref and valid time, same for all queries
+  reftimeString<-gsub("'","''",getInsideTimeString(period))
+  validtimeString<-"NULL"
+  locationString <-"NULL"
+  
+  # selection of stations and progs, same for all queries
+  whereString<-" AS wciquery where "
+  orderString <-  " order by rowid,dataversion'"
+  stationString<-paste("wmo_no in(''",paste(wmo_no,collapse="'',''"),"'')",sep="")
+  progString<-paste("AND prog in(",paste(prg,collapse=","),")",sep="")
+  queryPart4<-paste(whereString,stationString,progString,orderString)
+
+  if (is.null(members))
+    # select all versions
+    versionString="NULL"
+  else
+    versionString<-paste("ARRAY[", paste(members,collapse=","),"]",collapse="")
+ 
+  
+  allmodels<-data.frame()
+  
+  for (model in models){
+    for (par  in parameters){
+    # each model/parameter combo results in a dataframe with rows like this
+    # WMO_NO, TIME,PROG, TT.EC.1 TT.EC.2 TT.EC.3 ........       TT.EC.50
+    # which are then merged together to something like
+    # WMO_NO, TIME,PROG, TT.EC.1 TT.EC.T2....  TCC.EC.1 TCC.EC.2 TCC.EC3...
+
+
+      # create source_sql string from wmo_no, period, models, parameters, prg
+      # query which gives all the data + an extra row id column
+      # the row id is for classification
+      queryPart1 <-"'select * from (select (placename||'',''||to_char(validtimefrom,''YYYYMMDDHH24'')||'',''||wci.prognosishour(referencetime, validtimefrom)||'',''||levelfrom) as rowid , placename as wmo_no, to_char(validtimefrom,''YYYYMMDDHH24'') as time, wci.prognosishour(referencetime, validtimefrom) as prog,
+  dataversion,  to_char(value,''9999D99'') "
+      queryPart2<- "from wci.read("
+       modelString<-gsub("'","''",getDataProviderString(model))
+      parameterString<-gsub("'","''",getParameterString(par))
+      levelString="NULL"
+      returnString<-"NULL::wci.returnfloat)"
+      queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
+      source_sql<-paste(queryPart1,queryPart2,queryPart3,")",queryPart4)
+      
+      # query which gives the version
+      queryCategoryPart1 <- "' SELECT distinct(dataversion)";
+      category_sql <-paste(queryCategoryPart1,queryPart2,queryPart3,"order by dataversion'")
+
+
+      if (is.null(members)){
+        # find number of dataversions=ensemble members 
+        queryCountPart1 <- "SELECT count(distinct(dataversion))"
+        count_sql <-gsub("''","'",paste(queryCountPart1,queryPart2,queryPart3))
+        cat("\n",count_sql,"\n")
+        rs <- dbSendQuery(con, count_sql )
+        results<-fetch(rs,n=-1)
+        nversion<- results[1,1]-1
+        members<-c(0:nversion)
+      }
+        
+      # columns to sort into, depends on how many ensembleversions we have    
+      parmodel<- paste("\"",par,".",model,".",sep="")
+      floatparmodel<-paste("\" float,", parmodel)
+      colstring <- paste(members,collapse=floatparmodel)
+      colstring <- paste(parmodel,colstring,"\" float",sep="")
+      asct_sql <- paste("as ct(rowid text,wmo_no text, time text, prog int,",colstring,  ")")
+
+      # the final crosstab query
+      query<-paste("select * from crosstab(",source_sql, ",", category_sql, ")", asct_sql,sep="")
+
+      cat("\n",query,"\n") 
+      rs <- dbSendQuery(con, query)
+      results<-fetch(rs,n=-1)
+      results<-results[,-1]
+      
+      if (nrow(allmodels)==0){      
+        allmodels<-results
+      }
+      else{
+        allmodels<-merge(allmodels,results)
+      }
+      
+      
+    }
+  }
+
+
+  return(allmodels)
+ #remove first column which is just to sort by
+ #merge models, parameters
+}
+
+
 
 
 getInsideTimeString<-function(period){
@@ -164,14 +258,15 @@ getFormattedTime<-function(period,addDay=FALSE){
 
 # Mapping from miopdb parameter name to proffdb parameter name
 parameters<-c("air temperature","air pressure at sea level","wind speed",
-              "wind from direction")
-prm<-c("TT","P","FF","DD")
+              "wind from direction","cloud area fraction")
+prm<-c("TT","P","FF","DD","TCC")
 names(parameters)<-prm
 names(prm)<-parameters
 
 # Mapping from miopdb model name to proffdb dataprovider name
-dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast","h8","um4")
-models<-c("DEF","APP","RAW","H12","LOC","H8","UM4")
+dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast","h8","um4","pgen_percentile yr")
+models<-c("DEF","APP","RAW","H12","LOC","H8","UM4","EPS")
+
 names(dataproviders)<-models
 names(models)<-dataproviders
 
@@ -187,7 +282,6 @@ getParameterString<-function(param){
   ps<-paste("ARRAY['",parameterstring,"']",sep="")
   return (ps)	
 }
-
 
 
 
