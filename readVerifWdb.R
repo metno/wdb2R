@@ -24,7 +24,7 @@ startup<-function(db){
   drv<<-dbDriver("PostgreSQL")
   if (db=="dev3"){
     con<<-dbConnect(drv,  dbname="wdb",  user="wdb", host="wdb-dev3")
-    rs<-suppressWarnings(dbSendQuery(con,"select wci.begin('wdb',88,123,88)"))
+    rs<-suppressWarnings(dbSendQuery(con,"select wci.begin('wdb',88,456,88)"))
   }
   dbClearResult(rs)
  }
@@ -39,7 +39,7 @@ finish<-function(){
 }
 
 
-readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,testLatency=false){
+readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
 
   queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
 
@@ -47,31 +47,38 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,test
   #create empty data frame to hold all models
   allmodels<-data.frame()
 # loop over models
-  for (model in models){
-    for (par  in parameters){
+  for (mod in model){
+    for (par  in prm){
 
     # each model/parameter combo results in a dataframe with rows like this
     # WMO_NO, TIME,PROG, TT.EC
     # which are then merged together to something like
     # WMO_NO, TIME,PROG, TT.EC TT.UM FF.EC FF.UM      
    
-      modelString<-getDataProviderString(model)
+      modelString<-getDataProviderString(mod)
       locationString <-"NULL"
-      reftimeString<-getInsideTimeString(period)
-      validtimeString<-"NULL"
+      if (useReftime){
+        reftimeString<-getInsideTimeString(period)
+        validtimeString<-"NULL"
+      } else{
+        reftimeString<-getInsideTimeString(period,subtracthours=300)
+        validtimeString<-getInsideTimeString(period)
+      }
       parameterString<-getParameterString(par)
       levelString<-"NULL" #should be possible to select level?
       versionString<-"NULL"
-      returnString<-"NULL::wci.returnfloat))"
-      whereString<-"AS wciquery where("
+      returnString<-"NULL::wci.returnfloat)"
+      init.timestring <- sprintf("%02i", init.time)
+      terminString <- paste("where to_char(referencetime,'HH24') in ('",init.timestring,"')",sep="")
+      whereString<-")AS wciquery where("
       stationString<-paste("WMO_NO in('",paste(wmo_no,collapse="','"),"')",sep="")      
       progString<-paste("AND PROG in(",paste(prg,collapse=","),") )",sep="")      
       
-      parmodel<-paste("\"", paste(par,model,sep=".")  ,"\"",sep="")
+      parmodel<-paste("\"", paste(par,mod,sep=".")  ,"\"",sep="")
       queryPart2<- paste(",value as",parmodel, "from wci.read(")
       queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
-      queryPart4<-paste(whereString,stationString,progString)
- 
+      queryPart4<-paste(terminString,whereString,stationString,progString,"order by TIME")
+
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
  
@@ -105,6 +112,7 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,test
           print(tm)
         }
         else
+          if (nrow(results)!=0)      
           allmodels<-merge(allmodels,results)
       }
 
@@ -131,10 +139,10 @@ readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,test
 }
 
 
-readEnsembleWdb<-function(wmo_no,period,parameters,models,prg,members=NULL){
+readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
   # example call
-  # readEnsembleWdb(wmo_no=c(10380,98790),period=c(20120310,20120312),models=c("EPS"),parameters=c("TT"),prg=c(12,18))->mydf
-  # readEnsembleWdb(wmo_no=c(18700),period=c(20120310,20120312),models=c("EPS"),parameters=c("TCC"),prg=c(12),members=c(0:10))-> mydf
+  # readEnsembleWdb(wmo_no=c(10380,98790),period=c(20120310,20120312),model=c("EPS"),parameters=c("TT"),prg=c(12,18))->mydf
+  # readEnsembleWdb(wmo_no=c(18700),period=c(20120310,20120312),model=c("EPS"),parameters=c("TCC"),prg=c(12),members=c(0:10))-> mydf
   
   # selection of ref and valid time, same for all queries
   reftimeString<-gsub("'","''",getInsideTimeString(period))
@@ -157,21 +165,21 @@ readEnsembleWdb<-function(wmo_no,period,parameters,models,prg,members=NULL){
   
   allmodels<-data.frame()
   
-  for (model in models){
-    for (par  in parameters){
+  for (mod in model){
+    for (par  in prm){
     # each model/parameter combo results in a dataframe with rows like this
     # WMO_NO, TIME,PROG, TT.EC.1 TT.EC.2 TT.EC.3 ........       TT.EC.50
     # which are then merged together to something like
     # WMO_NO, TIME,PROG, TT.EC.1 TT.EC.T2....  TCC.EC.1 TCC.EC.2 TCC.EC3...
 
 
-      # create source_sql string from wmo_no, period, models, parameters, prg
+      # create source_sql string from wmo_no, period, models, prm, prg
       # query which gives all the data + an extra row id column
       # the row id is for classification
       queryPart1 <-"'select * from (select (placename||'',''||to_char(validtimefrom,''YYYYMMDDHH24'')||'',''||wci.prognosishour(referencetime, validtimefrom)||'',''||levelfrom) as rowid , placename as wmo_no, to_char(validtimefrom,''YYYYMMDDHH24'') as time, wci.prognosishour(referencetime, validtimefrom) as prog,
   dataversion,  to_char(value,''9999D99'') "
       queryPart2<- "from wci.read("
-       modelString<-gsub("'","''",getDataProviderString(model))
+       modelString<-gsub("'","''",getDataProviderString(mod))
       parameterString<-gsub("'","''",getParameterString(par))
       levelString="NULL"
       returnString<-"NULL::wci.returnfloat)"
@@ -195,7 +203,7 @@ readEnsembleWdb<-function(wmo_no,period,parameters,models,prg,members=NULL){
       }
         
       # columns to sort into, depends on how many ensembleversions we have    
-      parmodel<- paste("\"",par,".",model,".",sep="")
+      parmodel<- paste("\"",par,".",mod,".",sep="")
       floatparmodel<-paste("\" float,", parmodel)
       colstring <- paste(members,collapse=floatparmodel)
       colstring <- paste(parmodel,colstring,"\" float",sep="")
@@ -229,7 +237,7 @@ readEnsembleWdb<-function(wmo_no,period,parameters,models,prg,members=NULL){
 
 
 
-getInsideTimeString<-function(period){
+getInsideTimeString<-function(period,subtracthours=0){
   if (is.null(period)){
     #use last week
     today<-Sys.Date()
@@ -238,19 +246,20 @@ getInsideTimeString<-function(period){
   }
   if (length(period)==1) period=c(period,period)	
   # now length of period is at least two (use only the first two entries)
-  fstarttime<-getFormattedTime(period[1])
-  fendtime<-getFormattedTime(period[2],TRUE)
+  fstarttime<-getFormattedTime(period=period[1],subtracthours=subtracthours)
+  fendtime<-getFormattedTime(period=period[2],addDay=TRUE)
   rtstring<-paste("'inside ",fstarttime," TO ",fendtime,"'",sep="")
   return(rtstring)
 }
 
 
-getFormattedTime<-function(period,addDay=FALSE){
+getFormattedTime<-function(period,addDay=FALSE,subtracthours=0){
   # get formatted time ie 2012-01-28 00:00:00  from period ie 20120128
   # if addDay=true, add one day
   timestring<-paste(period,00)
   time<-strptime(timestring,"%Y%m%d%H")
-  if (addDay)time<-time+24*3600
+  if (addDay)time<-time+23*3600
+  if (subtracthours!=0) time <- time-subtracthours*3600
   ftime<-format(time,"%Y-%m-%d %H:%M:%S")
   return(ftime)
 }

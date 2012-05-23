@@ -19,7 +19,7 @@ Use
 call startup("xxx") to load driver and connect to database
 
 The function
-readVerifWdb<-function(wmo_no,period,models,parameters,prg,testMemory=false,testLatency=false)
+readVerifWdb<-function(wmo_no,period,model,prm,prg,testMemory=false,testLatency=false)
 extracts data for the given station numbers, time periods, parameters, models and prognosis lengths.
 
 Output is an R.dataframe with a format similar to this
@@ -39,7 +39,7 @@ call finish() to disconnect
 Examples of use
 ---------------
 mydf<-readVerifWdb(c(1317,1492),c(20120128,20120130),c("DEF","APP"),c("TT","P"),NULL)
-mydf<-readVerifWdb(wmo_no=c(1317,1492),period=NULL,model=c("DEF","RAW","H12"),parameters=c("TT","P"),prg=c(2,4,6)
+mydf<-readVerifWdb(wmo_no=c(1317,1492),period=NULL,model=c("DEF","RAW","H12"),prm=c("TT","P"),prg=c(2,4,6)
 mydf<-readVerifWdb(c(10800,10380,17250),c(20120131,20120203),c("DEF","APP","LOC"),c("TT","P"), c(18,36))
 
 
