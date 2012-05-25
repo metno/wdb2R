@@ -65,7 +65,7 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
         validtimeString<-getInsideTimeString(period)
       }
       parameterString<-getParameterString(par)
-      levelString<-"NULL" #should be possible to select level?
+      levelString<-getLevelString(par)
       versionString<-"NULL"
       returnString<-"NULL::wci.returnfloat)"
       init.timestring <- sprintf("%02i", init.time)
@@ -266,11 +266,7 @@ getFormattedTime<-function(period,addDay=FALSE,subtracthours=0){
 
 
 # Mapping from miopdb parameter name to proffdb parameter name
-parameters<-c("air temperature","air pressure at sea level","wind speed",
-              "wind from direction","cloud area fraction")
-prm<-c("TT","P","FF","DD","TCC")
-names(parameters)<-prm
-names(prm)<-parameters
+parameterDefinitions <- read.table("parameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
 
 # Mapping from miopdb model name to proffdb dataprovider name
 dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast","h8","um4","pgen_percentile yr")
@@ -278,6 +274,10 @@ models<-c("DEF","APP","RAW","H12","LOC","H8","UM4","EPS")
 
 names(dataproviders)<-models
 names(models)<-dataproviders
+
+
+
+
 
 getDataProviderString<-function(model){
   modelstring<-paste(dataproviders[model],collapse="','")
@@ -287,10 +287,17 @@ getDataProviderString<-function(model){
 
 
 getParameterString<-function(param){
-  parameterstring<-paste(parameters[param],collapse="','")
-  ps<-paste("ARRAY['",parameterstring,"']",sep="")
-  return (ps)	
+  pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
+  valueparametername <<- as.character(pdef$valueparametername)
+  parameterstring<-paste("ARRAY['",valueparametername,"']",sep="")
+  return (parameterstring)	
 }
 
 
-
+getLevelString<-function(param){
+  pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
+  levelparametername <- as.character(pdef$levelparametername)
+  defaultlevel <- as.character(pdef$defaultlevel)
+  levelstring <- paste("'",defaultlevel," ",levelparametername,"'",sep="")
+  return(levelstring)
+}
