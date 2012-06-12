@@ -212,7 +212,8 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
       }
         
       # columns to sort into, depends on how many ensembleversions we have    
-      parmodel<- paste("\"",par,".",mod,".",sep="")
+      parmod <- paste(par,mod,sep=".")
+      parmodel<- paste("\"",parmod,".",sep="")
       floatparmodel<-paste("\" float,", parmodel)
       colstring <- paste(members,collapse=floatparmodel)
       colstring <- paste(parmodel,colstring,"\" float",sep="")
@@ -225,6 +226,20 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
       rs <- dbSendQuery(con, query)
       results<-fetch(rs,n=-1)
       results<-results[,-1]
+
+
+
+      if (nrow(results)!=0){
+        for (i in 1:ncol(results)){
+          #check if this is a parameter column
+          if (length(grep(parmod,names(results)[i],TRUE,TRUE))>0) {
+            values<-as.double(unlist(results[,i]))
+            #convert values to other units
+            values <- convertValues(values,par)
+            results[,i] <- values
+          }
+        }
+      }
       
       if (nrow(allmodels)==0){      
         allmodels<-results
@@ -304,7 +319,6 @@ getParameterString<-function(param){
 
 
 convertValues <- function(values,param){
-  cat("convertValues\n")
   pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
   miopdb_unit<- as.character(pdef$miopdb_unit)
   unit<- as.character(pdef$unit)
