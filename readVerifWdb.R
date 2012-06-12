@@ -16,6 +16,7 @@
 # close connecion when finished
 # finish()
 
+library(udunits2)
 library(DBI)
 library(RPostgreSQL)
 
@@ -74,7 +75,8 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
       stationString<-paste("WMO_NO in('",paste(wmo_no,collapse="','"),"')",sep="")      
       progString<-paste("AND PROG in(",paste(prg,collapse=","),") )",sep="")      
       
-      parmodel<-paste("\"", paste(par,mod,sep=".")  ,"\"",sep="")
+      parmod <- paste(par,mod,sep=".")
+      parmodel<-paste("\"", parmod  ,"\"",sep="")
       queryPart2<- paste(",value as",parmodel, "from wci.read(")
       queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
       queryPart4<-paste(terminString,whereString,stationString,progString,"order by TIME")
@@ -101,7 +103,14 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
       dbClearResult(rs)
 
-      
+
+      if (nrow(results)!=0){
+        values<-as.double(unlist(results[parmod]))
+        #convert values to other units
+        values <- convertValues(values,par)
+        results[parmod] <- values
+      }
+          
       if (nrow(allmodels)==0){      
         allmodels<-results
       }
@@ -288,9 +297,20 @@ getDataProviderString<-function(model){
 
 getParameterString<-function(param){
   pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
-  valueparametername <<- as.character(pdef$valueparametername)
+  valueparametername <- as.character(pdef$valueparametername)
   parameterstring<-paste("ARRAY['",valueparametername,"']",sep="")
   return (parameterstring)	
+}
+
+
+convertValues <- function(values,param){
+  cat("convertValues\n")
+  pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
+  miopdb_unit<- as.character(pdef$miopdb_unit)
+  unit<- as.character(pdef$unit)
+  if (!miopdb_unit==unit)
+    values <- ud.convert(values,unit,miopdb_unit)
+  return(values)
 }
 
 
