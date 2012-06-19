@@ -163,7 +163,7 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 }
 
 
-readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
+readEnsembleWdb<-function(wmo_no,period,prm,model,prg,lev=NULL,members=NULL){
   # example call
   # readEnsembleWdb(wmo_no=c(10380,98790),period=c(20120310,20120312),model=c("EPS"),parameters=c("TT"),prg=c(12,18))->mydf
   # readEnsembleWdb(wmo_no=c(18700),period=c(20120310,20120312),model=c("EPS"),parameters=c("TCC"),prg=c(12),members=c(0:10))-> mydf
@@ -204,8 +204,8 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
   dataversion,  to_char(value,''9999D99'') "
       queryPart2<- "from wci.read("
       modelString<-gsub("'","''",getDataProviderString(mod))
-      parameterString<-gsub("'","''",getParameterString(par,level))
-      levelString <- gsub("'","''",getLevelString(par))
+      parameterString<-gsub("'","''",getParameterString(par))
+      levelString <- gsub("'","''",getLevelString(par,lev))
       returnString<-"NULL::wci.returnfloat)"
       queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
       source_sql<-paste(queryPart1,queryPart2,queryPart3,")",queryPart4)
@@ -253,9 +253,6 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
             values <- convertValues(values,par)
             results[,i] <- values
           }
-          # levels <- results$LEV
-          # levels <- convertLevels(levels,par)
-          # results$LEV <- levels
         }
       }
       
