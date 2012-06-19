@@ -20,6 +20,14 @@ library(udunits2)
 library(DBI)
 library(RPostgreSQL)
 
+# define parameters
+parameterDefinitions <- read.table("parameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
+levelParameterDefinitions <- read.table("levelparameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
+
+#define dataproviders
+dataproviderDefinitions<- read.table("dataproviders.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
+
+
 startup<-function(db){
  #startup; load driver, connect to wdb etc
   drv<<-dbDriver("PostgreSQL")
@@ -43,6 +51,8 @@ finish<-function(){
 readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
 
   queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
+  if (!is.null(lev))
+    queryPart1 <- paste(queryPart1,",levelfrom as LEV")
 
   maxmemory<<-0
   #create empty data frame to hold all models
@@ -66,7 +76,7 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
         validtimeString<-getInsideTimeString(period)
       }
       parameterString<-getParameterString(par)
-      levelString<-getLevelString(par)
+      levelString<-getLevelString(par,lev)
       versionString<-"NULL"
       returnString<-"NULL::wci.returnfloat)"
       init.timestring <- sprintf("%02i", init.time)
@@ -103,12 +113,17 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
       dbClearResult(rs)
 
-
+                                       
       if (nrow(results)!=0){
         values<-as.double(unlist(results[parmod]))
         #convert values to other units
         values <- convertValues(values,par)
         results[parmod] <- values
+        levs <- results$lev
+        if (length(levs)!=0){
+          levs <- convertLevels(levs,par)
+          results$lev <- levs
+        }
       }
           
       if (nrow(allmodels)==0){      
@@ -188,9 +203,9 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
       queryPart1 <-"'select * from (select (placename||'',''||to_char(validtimefrom,''YYYYMMDDHH24'')||'',''||wci.prognosishour(referencetime, validtimefrom)||'',''||levelfrom) as rowid , placename as wmo_no, to_char(validtimefrom,''YYYYMMDDHH24'') as time, wci.prognosishour(referencetime, validtimefrom) as prog,
   dataversion,  to_char(value,''9999D99'') "
       queryPart2<- "from wci.read("
-       modelString<-gsub("'","''",getDataProviderString(mod))
-      parameterString<-gsub("'","''",getParameterString(par))
-      levelString="NULL"
+      modelString<-gsub("'","''",getDataProviderString(mod))
+      parameterString<-gsub("'","''",getParameterString(par,level))
+      levelString <- gsub("'","''",getLevelString(par))
       returnString<-"NULL::wci.returnfloat)"
       queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
       source_sql<-paste(queryPart1,queryPart2,queryPart3,")",queryPart4)
@@ -238,6 +253,9 @@ readEnsembleWdb<-function(wmo_no,period,prm,model,prg,members=NULL){
             values <- convertValues(values,par)
             results[,i] <- values
           }
+          # levels <- results$LEV
+          # levels <- convertLevels(levels,par)
+          # results$LEV <- levels
         }
       }
       
@@ -288,24 +306,9 @@ getFormattedTime<-function(period,addDay=FALSE,subtracthours=0){
   return(ftime)
 }
 
-
-# Mapping from miopdb parameter name to proffdb parameter name
-parameterDefinitions <- read.table("parameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
-
-# Mapping from miopdb model name to proffdb dataprovider name
-dataproviders<-c("proff.default","proff.approved","proff.raw","proff.h12","locationforecast","h8","um4","pgen_percentile yr")
-models<-c("DEF","APP","RAW","H12","LOC","H8","UM4","EPS")
-
-names(dataproviders)<-models
-names(models)<-dataproviders
-
-
-
-
-
 getDataProviderString<-function(model){
-  modelstring<-paste(dataproviders[model],collapse="','")
-  dps<-paste("ARRAY['",modelstring,"']",sep="")
+  dataprovider<-dataproviderDefinitions[dataproviderDefinitions$shortmodelname==model,]$dataprovider
+  dps<-paste("ARRAY['",dataprovider,"']",sep="")
   return (dps)	
 }
 
@@ -322,16 +325,56 @@ convertValues <- function(values,param){
   pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
   miopdb_unit<- as.character(pdef$miopdb_unit)
   unit<- as.character(pdef$unit)
-  if (!miopdb_unit==unit)
+  if (!is.na(unit)&&!miopdb_unit==unit)
     values <- ud.convert(values,unit,miopdb_unit)
   return(values)
 }
-
-
-getLevelString<-function(param){
+  
+getLevelString<-function(param,lev){
+  levelstring <- "'NULL'"
   pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
-  levelparametername <- as.character(pdef$levelparametername)
-  defaultlevel <- as.character(pdef$defaultlevel)
-  levelstring <- paste("'",defaultlevel," ",levelparametername,"'",sep="")
+
+  if (nrow(pdef)!=0) {
+    if (is.null(lev)){
+      levelparametername <- as.character(pdef$groundlevelparametername)
+      level <- as.character(pdef$groundlevel)
+    } else{
+      levelparametername <- as.character(pdef$levelparametername)
+      levpdef <- levelParameterDefinitions[levelParameterDefinitions$levelparametername==levelparametername,]
+      #check if we need to convert level from miopdbunit
+      if (nrow(levpdef)!=0) {
+        miopdb_levelunit<- as.character(levpdef$miopdb_unit)
+        levelunit<- as.character(levpdef$unit)
+        if (!is.na(levelunit)&&!miopdb_levelunit==levelunit){
+          lev <- ud.convert(lev,miopdb_levelunit,levelunit)
+        }
+      }
+      level <- format(lev,scientific=FALSE)
+      
+    }
+
+    
+    levelstring <- paste("'",level," ",levelparametername,"'",sep="")  
+  }
   return(levelstring)
+}
+
+
+
+convertLevels <- function(levs,param){
+  pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
+  if (nrow(pdef)!=0) {
+    levelparametername <- as.character(pdef$levelparametername)
+    levpdef <- levelParameterDefinitions[levelParameterDefinitions$levelparametername==levelparametername,]
+    #check if we need to convert level from miopdbunit
+    if (nrow(levpdef)!=0) {
+      miopdb_levelunit<- as.character(levpdef$miopdb_unit)
+      levelunit<- as.character(levpdef$unit)
+      if (!is.na(levelunit)&&!miopdb_levelunit==levelunit){
+        levs <- ud.convert(levs,levelunit,miopdb_levelunit)
+      }
+
+    }
+  }
+  return(levs)
 }
