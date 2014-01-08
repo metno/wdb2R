@@ -6,17 +6,17 @@ Before running this scripts install R, and then install packages DBI and RPostgr
 
 Installation:
 -------------
-in R:
-> install.packages("DBI","/path/to/library")
-> install.packages("RPostgreSQL","/path/to/library")
+sudo apt-get install libudunits2-dev 
 
+in R:
+> install.packages("DBI")
+> install.packages("RPostgreSQL")
+> install.packages("udunits2")
 
 Use
 ----
-> library(DBI,lib.loc="/path/to/library")
-> library(RPostgreSQL,lib.loc="path/to/library")
+
 > source("readVerifWdb.R")
-call startup("xxx") to load driver and connect to database
 
 The function
 readVerifWdb<-function(wmo_no,period,model,prm,prg,testMemory=false,testLatency=false)
@@ -29,10 +29,6 @@ Output is an R.dataframe with a format similar to this
 3   10380 2011022203    3 181.600 3.231 259.648 1029.420 182.710 3.230 259.523 1029.420
 
 with all values for one place/time/prog  on one row
-
-Mapping from wdb dataprovider names to R model names are given in vectors dataproviders/models
-
-Mapping from wdb parameter names to R parameter names are given in vectors parameters/prm
 
 call finish() to disconnect
 
