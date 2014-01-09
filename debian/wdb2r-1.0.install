@@ -1,0 +1,3 @@
+*.R usr/share/wdb2r
+*.conf usr/share/wdb2r
+README usr/share/doc/wdb2r
