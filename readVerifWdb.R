@@ -1,46 +1,92 @@
 # before running this script install packages from CRAN
 # in R:
-# > install.packages("RPostgreSQL","/path/to/library")
-# > library(DBI,lib.loc="/path/to/library")
-# > library(RPostgreSQL,lib.loc="path/to/library")
+# > install.packages("DBI")
+# > install.packages("RPostgreSQL")
+# > install.packages("udunits2")
 #
 
 # Example of use:
 # connect to database
-# startup(dev3)
-# mydf<-readVerifWdb(c(10800,10380,17250),c(20120131,20120203),c("DEF","APP","LOC"),c("TT","P"), c(18,36))
-# mydf<-readVerifWdb(c(1317,1492),c(20120128,20120130),c("DEF","APP"),c("TT","P"),NULL)
+# mydf<-readVerifWdb(c(1003,1005,1008),c(20120131,20120203),c("EC","UK","UM4"),c("TT","P"), c(18,36))
+# mydf<-readVerifWdb(c(1317,1492),c(1990128,19990130),c("H50","H10"),c("DD","FF"),prg=seq(3,21,3))
 # mydf<-readVerifWdb(wmo_no=c(1317,1492),period=NULL,model=c("DEF","RAW","H12"),parameters=c("TT","P"),prg=c(2,4,6))
 # more calls to readVerifWdb
 # ....
 # close connecion when finished
 # finish()
 
-library(udunits2)
-library(DBI)
-library(RPostgreSQL)
+
 
 # define parameters
-parameterDefinitions <- read.table("parameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
-levelParameterDefinitions <- read.table("levelparameters.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
+DD<-c("DD","degrees","wind from direction","air pressure","height above ground","10","radians")
+FF<-c("FF","m/s","wind speed","air pressure","height above ground","10","m/s")
+TT<-c("TT","celsius","air temperature","air pressure","height above ground","2","kelvin")
+TT_K<-c("TT_K","celsius","kalman air temperature","air pressure","height above ground","2","kelvin")
+TT.K<-c("TT.K","celsius","kalman air temperature","air pressure","height above ground","2","kelvin")
+TD<-c("TD","celsius","dew point temperature","air pressure","height above ground","2","kelvin")
+RR<-c("RR","mm","lwe thickness of precipitation amount","air pressure","height above ground","0","m")
+P<-c("P","hPa","air pressure at sea level",NA,"height above ground","0","Pa")
+N<-c("N","%","cloud area fraction",NA,"air pressure","100000","%")
+CH<-c("CH","%","cloud area fraction in atmosphere layer",NA,"air pressure","30000","%")
+FG<-c("FG","%","cloud area fraction in atmosphere layer",NA,"air pressure","100000","%")
+CL<-c("CL","%","cloud area fraction in atmosphere layer",NA,"air pressure","85000","%")
+CM<-c("CM","%","cloud area fraction in atmosphere layer",NA,"air pressure","50000","%")
+UU<-c("UU","%","relative humidity","air pressure",NA,NA,"%")
+Z<-c("Z",NA,"atmosphere sigma coordinate","air pressure",NA,NA,NA)
+parameterDefinitions<-data.frame(rbind(DD,FF,TT,TT_K,TT.K,TD,RR,P,N,CH,FG,CL,CM,UU,Z))
+colnames(parameterDefinitions)<-c("miopdb_par","miopdb_unit","valueparametername","levelparametername","groundlevelparametername","groundlevel","unit")
 
-#define dataproviders
-dataproviderDefinitions<- read.table("dataproviders.conf",sep=",",header=TRUE,stringsAsFactors=FALSE)
+NIVA<-c("NIVA","hPa","air pressure","Pa")
+levelparameterDefinitions <-data.frame(rbind(NIVA))
+colnames(levelparameterDefinitions)<-c("miopdb_par","miopdb_unit","levelparametername","unit")
 
 
-startup<-function(db){
- #startup; load driver, connect to wdb etc
+# definitions of dataproviders
+hirlam50<-c("hirlam50km_interpolated_v0","H50")
+hirlam10<-c("hirlam10km_interpolated_v0","H10")
+hirlam20<-c("hirlam20km_interpolated_v0","H20")
+hirlam4<-c("hirlam4km_interpolated_v0","H4")
+hirlam8<-c("hirlam8km_interpolated_v0","H8")
+hirlam12<-c("hirlam12km_interpolated_v0","H12")
+EC<-c("ecmwf15_interpolated_v0","EC1_LOW")
+ECMWF<-c("ecmwf_interpolated_v0","EC")
+UK<-c("uk_global_interpolated_v0","UK")
+UM4KM1<-c("unified_model4km_interpolated_v0","UM4")
+dataproviderDefinitions<-data.frame(rbind(hirlam50,hirlam10,hirlam20,hirlam4,hirlam8,hirlam12, EC,ECMWF,UK,UM4KM1))
+colnames(dataproviderDefinitions)<-c("dataprovider","shortmodelname")
+
+
+started <<-FALSE 
+
+startup<-function(){
+    if (!require(udunits2)) {
+    cat("The udunits2 package is not available.\n")
+   	return(NULL)
+  }   
+  if (!require(DBI)) {
+    cat("The DBI package is not available.\n")
+    return(NULL)
+  }       
+  if (!require(RPostgreSQL)) {
+    cat("The RpostgreSQL package is not available.\n")
+    return(NULL)
+  }   
+  #wdb stuff  
+  dbname <- "wdb"
+  user <- "wdb"
+  host <- "wdb-dev3"
+  namespace <- "88,42,88"
+  #load driver, connect to wdb etc
   drv<<-dbDriver("PostgreSQL")
-  if (db=="dev3"){
-    con<<-dbConnect(drv,  dbname="wdb",  user="wdb", host="wdb-dev3")
-    rs<-suppressWarnings(dbSendQuery(con,"select wci.begin('wdb',88,456,88)"))
-  }
+  con<<-dbConnect(drv,  dbname=dbname,  user=user, host=host)
+  sendquery <- "select wci.begin('wdb',88,42,88)"
+  rs<-suppressWarnings(dbSendQuery(con,sendquery))
   dbClearResult(rs)
- }
+}
 
 
 finish<-function(){
-# finish; release wci, disconnect, unload driver
+ # finish; release wci, disconnect, unload driver
   rs<-suppressWarnings(dbSendQuery(con,"select wci.end()"))
   dbClearResult(rs)
   dbDisconnect(con);
@@ -50,6 +96,11 @@ finish<-function(){
 
 readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
 
+  if (!started){
+    startup()
+    started <<- TRUE
+  }
+  
   queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
   if (!is.null(lev))
     queryPart1 <- paste(queryPart1,",levelfrom as LEV")
@@ -93,7 +144,6 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
- 
       cat(query,"\n") 
       if (testLatency){
         ts<-system.time(rs <- dbSendQuery(con, query))
@@ -112,12 +162,11 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
       cat("Size of results", object.size(results),"bytes \n")
 
       dbClearResult(rs)
-
-                                       
+                                            
       if (nrow(results)!=0){
         values<-as.double(unlist(results[parmod]))
         #convert values to other units
-        values <- convertValues(values,par)
+        #values <- convertValues(values,par)
         results[parmod] <- values
         levs <- results$lev
         if (length(levs)!=0){
@@ -328,7 +377,8 @@ convertValues <- function(values,param){
 }
   
 getLevelString<-function(param,lev){
-  levelstring <- "'NULL'"
+  levelstring <- "NULL"
+  return(levelstring)
   pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==param,]
 
   if (nrow(pdef)!=0) {
