@@ -2,7 +2,7 @@ WDB2R
 =====
 
 R-scripts for extracting and converting data from the wdb system
-Before running this scripts install R, and then install packages DBI and RPostgreSQL
+Before running this scripts install R, and then install packages DBI, RPostgreSQL and udunits
 
 Installation:
 -------------
@@ -20,7 +20,7 @@ Use
 
 The function
 readVerifWdb<-function(wmo_no,period,model,prm,prg,testMemory=false,testLatency=false)
-extracts data for the given station numbers, time periods, parameters, models and prognosis lengths.
+extracts data for the given station number, time periods, parameters, models and prognosis lengths.
 
 Output is an R.dataframe with a format similar to this
   wmo_no       time prog   DD.H8 FF.H8   TT.H8     P.H8  DD.UM4 FF.UM4   TT.UM4  P.UM4
@@ -34,21 +34,23 @@ call finish() to disconnect
 
 Examples of use
 ---------------
-mydf<-readVerifWdb(c(1317,1492),c(20120128,20120130),c("DEF","APP"),c("TT","P"),NULL)
-mydf<-readVerifWdb(wmo_no=c(1317,1492),period=NULL,model=c("DEF","RAW","H12"),prm=c("TT","P"),prg=c(2,4,6)
-mydf<-readVerifWdb(c(10800,10380,17250),c(20120131,20120203),c("DEF","APP","LOC"),c("TT","P"), c(18,36))
+> mydf<-readVerifWdb(c(1317),c(20120128,20120130),c("H4","H12"),c("TT","P"),NULL)
+> mydf<-readVerifWdb(wmo_no=c(1492),period=c(20090801,20090805),model=c("EC","UM4","H12"),prm=c("FF","DD"),prg=c(3,6,9))
+> mydf<-readVerifWdb(c(1003),c(20120131,20120203),c("H8","EC"),c("TD","RR"), c(18,36))
 
 
-
-Performance testing
--------------------
 > source("testWdb.R")
-readVerifWdb can be called with testMemory=TRUE and/or testLatency=FALSE to do some perfomance testing
+# find all models(shortmodelname) for station 1493, 1/3-2010, parameter wind speed(FF):
+> findAvailableModels(1493,20100301,"FF")
 
-The function
-testPerformance<-function(nplaces=NULL,nweeks=NULL,nmodels=NULL,nparams=NULL,nprogs=NULL,testLatency=TRUE,testMemory=TRUE)
-tests latency and memory use for fetching a given number of places, weeks, models, parameters and proglengths. It will first browse the data base to find what is available.
+# find all parameters(miopdb_par) for station 1493, 1/3-2010, model Hirlam 8
+> findAvailableParameters(1493,20100301,"H8")
 
-Example
---------
-testPerformance(nplaces=100,nweeks=12,nmodels=1,nparams=4,nprogs=10,testLatency=TRUE,testMemory=FALSE)->mydf
+# find all stations(wmo_no) for  1/3-2010, parameter wind speed(FF), model Hirlam 8
+> findAvailablePlaces(20100301,"FF","H8")
+
+# find all referencetimes for station 1493, parameter wind speed(FF), model Hirlam 8
+>  findAvailableReferencetimes(1493,"FF","H8")
+#
+# find all proglenghts for station 1493,1/3-2010, parameter wind speed(FF), model Hirlam 8
+> findAvailableProglengths(1493,20100301,"FF","H8")

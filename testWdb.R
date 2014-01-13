@@ -1,38 +1,91 @@
-foundAvailable<-FALSE
+source("readVerifWdb.R")
 
-findAvailableModels<-function(){
- # returns vector of available models
- query<-"SELECT dataprovidername FROM wci.browse( NULL::wci.browsedataprovider )"
+# Examples of use
+#
+# find all models(shortmodelname) for station 1493, 1/3-2010, parameter wind speed(FF):
+# findAvailableModels(1493,20100301,"FF")
+#
+# find all parameters(miopdb_par) for station 1493, 1/3-2010, model Hirlam 8
+# findAvailableParameters(1493,20100301,"H8")
+#
+# find all stations(wmo_no) for  1/3-2010, parameter wind speed(FF), model Hirlam 8
+# findAvailablePlaces(20100301,"FF","H8")
+#
+# find all referencetimes for station 1493, parameter wind speed(FF), model Hirlam 8
+# findAvailableReferencetimes(1493,"FF","H8")
+#
+# find all proglenghts for station 1493,1/3-2010, parameter wind speed(FF), model Hirlam 8
+# findAvailableProglengths(1493,20100301,"FF","H8")
+
+findAvailableModels<-function(wmo_no=NULL,date=NULL,prm=NULL){
+# returns vector of available models
+  startup()
+  query <- "SELECT dataprovidername FROM wci.browse( NULL,WMO_NO ,TIME,NULL, PARAMETER,NULL, NULL,NULL::wci.browsedataprovider )"
+  query <- sub("WMO_NO",wmostring(wmo_no) ,query)
+  query <- sub("TIME",timestring(date),query)
+  query <- sub("PARAMETER",parameterstring(prm),query)
+  print(query)
   rs <- dbSendQuery(con, query)
-  results<-fetch(rs,n=-1)
-  dbClearResult(rs)
-  vmodels<-vector(length=nrow(results))
-  for (i in 1:nrow(results)){
-    mod<-models[results$dataprovidername[i]]
-    vmodels[i]<-mod
+  results<<-fetch(rs,n=-1)
+  if (nrow(results)==0){
+    return()
   }
-  return(vmodels[!is.na(vmodels)])
+  dbClearResult(rs)
+  vmodels<<-vector(length=0)
+  if (nrow(results)==0)
+    return(vmodels)
+  for (i in 1:nrow(results)){
+    dp <- results$dataprovidername[i]
+    dpdef <- dataproviderDefinitions[dataproviderDefinitions$dataprovider==dp,]
+    if (nrow(dpdef)==1){
+      mod<-dpdef$shortmodelname
+      vmodels<<-c(vmodels,as.character(mod))
+    } else {
+      vmodels<<-c(vmodels,as.character(dp))
+    }
+  }
+  return(vmodels)
  }
 
 
-findAvailableParameters<-function(){
- # returns vector of available models
-  query<-"SELECT valueparametername FROM wci.browse( NULL::wci.browsevalueparameter )"
+findAvailableParameters<-function(wmo_no=NULL,date=NULL,model=NULL){
+  startup()
+ # returns vector of available parameters
+  query <- "SELECT valueparametername FROM wci.browse(DATAPROVIDER,WMO_NO ,TIME,NULL, NULL,NULL, NULL,NULL::wci.browsevalueparameter )"
+  query <- sub("WMO_NO",wmostring(wmo_no) ,query)
+  query <- sub("TIME",timestring(date),query)
+  query <- sub("DATAPROVIDER",dataproviderstring(model),query)
+  print(query)
   rs <- dbSendQuery(con, query)
-  results<-fetch(rs,n=-1)
+  results<<-fetch(rs,n=-1)
   dbClearResult(rs)
-  vparams<-vector(length=nrow(results))
+  vparams<<-vector(length=0)
+  if (nrow(results)==0)
+    return(vparams)
   for (i in 1:nrow(results)){
-    par<-prm[results$valueparametername[i]]
-    vparams[i]<-par
+    vp <- results$valueparametername[i]
+    vpdef <- parameterDefinitions[parameterDefinitions$valueparametername==vp,]
+    if (nrow(vpdef)>0){
+      for (j in 1:nrow(vpdef)){
+        par<-vpdef[j,]$miopdb_par
+        vparams <<- c(vparams,as.character(par))
+      }
+    } else {
+      vparams<<-c(vparams,as.character(vp))
+    }
   }
-  return(vparams[!is.na(vparams)])
+  return(vparams)
 }
 
 
-findAvailablePlaces<-function(){
+findAvailablePlaces<-function(date=NULL,prm=NULL,model=NULL){
  # returns vector of available places
-  query<-"SELECT placename FROM wci.browse( NULL::wci.browseplace )"
+  startup()
+  query <- "SELECT placename FROM wci.browse( DATAPROVIDER,NULL ,TIME,NULL, PARAMETER,NULL, NULL,NULL::wci.browseplace ) order by placename"  
+  query <- sub("TIME",timestring(date),query)
+  query <- sub("DATAPROVIDER",dataproviderstring(model),query)
+  query <- sub("PARAMETER",parameterstring(prm),query)  
+  print(query)
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -44,9 +97,13 @@ findAvailablePlaces<-function(){
  }
 
 
-findAvailableReferencetimes<-function(){
+findAvailableReferencetimes<-function(wmo_no=NULL,prm=NULL,model=NULL){
  # returns vector of available reftimes
-   query<-"SELECT distinct(to_char(referencetime,'YYYYMMDDHH24')) as time FROM wci.browse( NULL::wci.browsereferencetime)"
+  query <- "SELECT distinct(to_char(referencetime,'YYYYMMDDHH24')) as time FROM wci.browse( DATAPROVIDER,WMO_NO ,NULL,NULL, PARAMETER,NULL, NULL,NULL::wci.browsereferencetime) order by time"        
+  query <- sub("DATAPROVIDER",dataproviderstring(model),query)
+  query <- sub("PARAMETER",parameterstring(prm),query)
+  query <- sub("WMO_NO",wmostring(wmo_no) ,query)
+  print(query)
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -60,9 +117,14 @@ findAvailableReferencetimes<-function(){
 }
 
 
-findAvailableProglengths<-function(){
+findAvailableProglengths<-function(wmo_no=NULL,date=NULL,prm=NULL,model=NULL){
  # returns vector of available progtimes
-   query<-"SELECT distinct(wci.prognosishour(referencetime, validtimefrom)) as prog FROM wci.read(NULL,NULL, NULL,NULL, NULL,NULL, NULL,NULL::wci.returnfloat)"   
+  query<-"SELECT distinct(wci.prognosishour(referencetime, validtimefrom)) as prog FROM wci.read(DATAPROVIDER,WMO_NO,TIME,NULL, PARAMETER,NULL, NULL,NULL::wci.returnfloat) order by prog"
+  query <- sub("WMO_NO",wmostring(wmo_no) ,query)
+  query <- sub("TIME",timestring(date),query)
+  query <- sub("DATAPROVIDER",dataproviderstring(model),query)
+  query <- sub("PARAMETER",parameterstring(prm),query)
+  print(query)
   rs <- dbSendQuery(con, query)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
@@ -75,82 +137,45 @@ findAvailableProglengths<-function(){
  }
 
 
-findAvailable<-function(){
-  timemodels<-system.time(availableModels<<-findAvailableModels())
-  timeparams<-system.time(availableParams<<-findAvailableParameters())
-  timeplaces<-system.time(availablePlaces<<-findAvailablePlaces())
-  timereftimes<-system.time(allreftimes<<-findAvailableReferencetimes())
-  timeprogs<-system.time(availableProgs<<-findAvailableProglengths())
-  cat("Time in seconds to find available models, user:",  timemodels[1],"system:",timemodels[2], "elapsed:", timemodels[3],"\n")
-  cat("Time in seconds to find available parameters, user:",  timeparams[1],"system:",timeparams[2], "elapsed:", timeparams[3],"\n")
-  cat("Time in seconds to find available places, user:",  timeplaces[1],"system:",timeplaces[2], "elapsed:", timeplaces[3],"\n")
-  cat("Time in seconds to find available reference times, user:",  timereftimes[1],"system:",timereftimes[2], "elapsed:", timereftimes[3],"\n")
-  cat("Time in seconds to find available prognosis lengths, user:",  timeprogs[1],"system:",timeprogs[2], "elapsed:", timeprogs[3],"\n")
-  foundAvailable<<-TRUE
-}
 
-
-#get everything from database or number of weeks etc
-testPerformance<-function(nplaces=NULL,nweeks=NULL,nmodels=NULL,nparams=NULL,nprogs=NULL,testLatency=TRUE,testMemory=TRUE){
-  if (!foundAvailable)
-    findAvailable()
-  #find models, places, params etc. to look for from what's available
-  models<-getSelectedVector(nmodels,availableModels)
-  places<-getSelectedVector(nplaces,availablePlaces)
-  params<-getSelectedVector(nparams,availableParams)
-  progs<-getSelectedVector(nprogs,availableProgs)  
-  reftimes<-vector(length=2)
-  if (is.null(nweeks)){
-    reftimes[1]=allreftimes[1]
-    reftimes[2]=allreftimes[length(allreftimes)]
-  }else{
-    reftimes[1]<-allreftimes[1]
-    tdiff<-as.difftime(nweeks,unit="weeks")
-    newtime<-strptime(allreftimes[1],"%Y%m%d%H")+tdiff
-    reftimes[2]<-format(newtime,"%Y%m%d%H")
-  }
-  timeReadVerif<-system.time(mydf<-readVerifWdb(places,reftimes,models,params,progs,testLatency,testMemory))
-  cat("========= Test performance readVerifWdb ================ \n")
-  if (testLatency){
-    cat("Time in seconds to read data(readVerifWdb), user:",  timeReadVerif[1],"system:",timeReadVerif[2], "elapsed:", timeReadVerif[3],"\n")
-  }
-  if (testMemory){
-    cat("Max total memory used(readVerifWdb):", maxmemory,"bytes \n")
-  }
-  # Check places, progs and reftimes actually found
-  selectedPlaces<-levels(factor(mydf$wmo_no))
-  selectedProgs<-levels(factor(mydf$prog))
-  selectedReftimes<-levels(factor(mydf$time))
-  cat("Number of rows in resulting dataframe:", nrow(mydf),"\n")
-  cat("Number of columns in resulting dataframe:", ncol(mydf),"\n")
-  cat("Names of columns in resulting dataframe:",names(mydf),"\n")
-  cat("Number of places selected:",length(selectedPlaces),"\n")
-  cat("Number of models selected:",length(models),"\n")
-  cat("Number of parameters selected:",length(params),"\n")
-  cat("Number of proglengths selected:",length(selectedProgs),"\n")
-  cat("Number of referencetimes selected:",length(selectedReftimes),"\n")
-
-  cat("Selected places:",selectedPlaces,"\n") 
-  cat("Selected referencetimes:", selectedReftimes,"\n")
-  cat("Selected models:",models,"\n")
-  cat("Selected parameters:",params,"\n")
-  cat("Selected proglengths:",selectedProgs,"\n")
-
-  return(mydf)
-   
-
-}
-
-
-getSelectedVector<-function(nEntries,availableVector){
-  nAv<-length(availableVector)
-  if(is.null(nEntries) || nEntries>nAv){
-    selectedVector<-availableVector
+# utility functions
+wmostring <- function(wmo_no){
+  if (is.null(wmo_no)){
+    wmostring <- "NULL"    
   } else{
-    selectedVector<-availableVector[1:nEntries]
-  }  
-  
-  return(selectedVector)
+    wmostring <- paste("'",wmo_no,"'",sep="")
+  }
+  return(wmostring)
 }
 
+timestring <- function(date){
+  if (is.null(date)){
+    timestring <- "NULL"
+  } else{
+    time <- getFormattedTime(date)
+    timestring <- paste("'",time,"'",sep="")
+  }
+  return(timestring)
+}
 
+parameterstring <- function(prm){
+  if (is.null(prm)){
+    parameterstring <- "NULL"    
+  } else{
+    pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==prm,]
+    parameter <- as.character(pdef$valueparametername)
+    parameterstring <- paste("'{",parameter,"}'",sep="")
+  }
+  return(parameterstring)
+}
+
+dataproviderstring <- function(model){  
+  if (is.null(model)){
+    dataproviderstring <- "NULL";
+  } else {  
+    dpdef <- dataproviderDefinitions[dataproviderDefinitions$shortmodelname==model,]
+    dataprovider <- dpdef$dataprovider
+    dataproviderstring <- paste("ARRAY['",dataprovider,"']",sep="")
+  }
+  return(dataproviderstring)
+}
