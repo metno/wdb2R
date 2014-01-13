@@ -1,0 +1,14 @@
+Source: wdb2r-1.0
+Maintainer: Kim Tore Jensen <kimtj@met.no>
+Section: misc
+Priority: optional
+Standards-Version: 3.9.2
+Build-Depends: debhelper (>= 9)
+
+Package: wdb2r-1.0
+Architecture: all
+Provides: wdb2r
+Conflicts: wdb2r
+Depends: ${shlibs:Depends}, ${misc:Depends}, r-cran-dbi, r-metno-rpostgresql-0.4 (= 0.4), libudunits2-dev, libudunits2-0
+Description: extract and convert data from wdb
+ R-scripts for extracting and converting data from the wdb system
