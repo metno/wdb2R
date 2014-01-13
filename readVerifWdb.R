@@ -7,9 +7,9 @@
 
 # Example of use:
 # connect to database
-# mydf<-readVerifWdb(c(1003,1005,1008),c(20120131,20120203),c("EC","UK","UM4"),c("TT","P"), c(18,36))
-# mydf<-readVerifWdb(c(1317,1492),c(1990128,19990130),c("H50","H10"),c("DD","FF"),prg=seq(3,21,3))
-# mydf<-readVerifWdb(wmo_no=c(1317,1492),period=NULL,model=c("DEF","RAW","H12"),parameters=c("TT","P"),prg=c(2,4,6))
+# mydf<-readVerifWdb(c(1003),c(20120131,20120203),c("EC"),c("TT","P"), c(18,36))
+# mydf<-readVerifWdb(c(1493),c(20100131,20100203),c("EC","UM4"),c("FF","DD"), NULL)
+# mydf<-readVerifWdb(c(1317),c(1990128,19990130),c("H50","H10"),c("DD","FF"),prg=seq(3,21,3))
 # more calls to readVerifWdb
 # ....
 # close connecion when finished
@@ -55,33 +55,36 @@ UM4KM1<-c("unified_model4km_interpolated_v0","UM4")
 dataproviderDefinitions<-data.frame(rbind(hirlam50,hirlam10,hirlam20,hirlam4,hirlam8,hirlam12, EC,ECMWF,UK,UM4KM1))
 colnames(dataproviderDefinitions)<-c("dataprovider","shortmodelname")
 
-
 started <<-FALSE 
 
 startup<-function(){
-    if (!require(udunits2)) {
+  if (started)
+    return(TRUE)
+  if (!require(udunits2)) {
     cat("The udunits2 package is not available.\n")
-   	return(NULL)
+    return(FALSE)
   }   
   if (!require(DBI)) {
     cat("The DBI package is not available.\n")
-    return(NULL)
+    return(FALSE)
   }       
   if (!require(RPostgreSQL)) {
     cat("The RpostgreSQL package is not available.\n")
-    return(NULL)
-  }   
-  #wdb stuff  
+    return(FALSE)
+  }
+ #wdb stuff  
   dbname <- "wdb"
   user <- "wdb"
   host <- "wdb-dev3"
   namespace <- "88,42,88"
-  #load driver, connect to wdb etc
+ #startup; load driver, connect to wdb etc
   drv<<-dbDriver("PostgreSQL")
   con<<-dbConnect(drv,  dbname=dbname,  user=user, host=host)
   sendquery <- "select wci.begin('wdb',88,42,88)"
   rs<-suppressWarnings(dbSendQuery(con,sendquery))
   dbClearResult(rs)
+  started<<-TRUE
+  return(TRUE)
 }
 
 
@@ -94,7 +97,101 @@ finish<-function(){
 }
 
 
-readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
+readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE){
+
+  if (length(wmo_no)!=1){
+    cat("Length of wmo_no!=1\n")
+    return()
+  }
+
+  if (!startup())
+    return()
+  
+  queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
+  if (!is.null(lev))
+    queryPart1 <- paste(queryPart1,",levelfrom as LEV")
+
+  
+  #create empty data frame to hold all models
+  allmodels<-data.frame()
+# loop over models
+  for (mod in model){
+    for (par  in prm){
+
+    # each model/parameter combo results in a dataframe with rows like this
+    # WMO_NO, TIME,PROG, TT.EC
+    # which are then merged together to something like
+    # WMO_NO, TIME,PROG, TT.EC TT.UM FF.EC FF.UM        
+      modelString<-getDataProviderString(mod)
+      locationString <-paste("'",wmo_no,"'",sep="")
+      if (useReftime){
+        reftimeString<-getInsideTimeString(period)
+        validtimeString<-"NULL"
+      } else{
+        reftimeString<-getInsideTimeString(period,subtracthours=300)
+        validtimeString<-getInsideTimeString(period)
+      }
+      parameterString<-getParameterString(par)
+      levelString<-getLevelString(par,lev)
+      versionString<-"NULL"
+      returnString<-"NULL::wci.returnfloat)"
+      init.timestring <- sprintf("%02i", init.time)
+      terminString <- paste("where to_char(referencetime,'HH24') in ('",init.timestring,"')",sep="")
+      whereString<-")AS wciquery "
+      if(!is.null(prg)){
+        progString<-paste("where (PROG in(",paste(prg,collapse=","),") )",sep="")      
+      } else {
+        progString <- ""
+      }
+      parmod <- paste(par,mod,sep=".")
+      parmodel<-paste("\"", parmod  ,"\"",sep="")
+      queryPart2<- paste(",value as",parmodel, "from wci.read(")
+      queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
+      queryPart4<-paste(terminString,whereString,progString,"order by TIME")
+      
+      query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
+
+      cat(query,"\n") 
+      rs <- dbSendQuery(con, query)
+      results<-fetch(rs,n=-1)
+ 
+      cat("Number of rows in results", nrow(results),"\n")
+      cat("Size of results", object.size(results),"bytes \n")
+
+      dbClearResult(rs)
+     
+      if (nrow(results)!=0){
+        values<-as.double(unlist(results[parmod]))
+        #convert values to other units
+        values <- convertValues(values,par)
+        results[parmod] <- values
+        levs <- results$lev
+        if (length(levs)!=0){
+          levs <- convertLevels(levs,par)
+          results$lev <- levs
+        }
+      }
+          
+      if (nrow(allmodels)==0){      
+        allmodels<-results
+      }
+      else{
+        if (nrow(results)!=0){      
+          allmodels<-merge(allmodels,results)
+        }
+        
+      }
+      
+    }
+  }
+  
+    
+  return(allmodels)  
+}
+
+
+
+readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
 
   if (!started){
     startup()
@@ -144,6 +241,10 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
+      
+      
+      startup()
+      
       cat(query,"\n") 
       if (testLatency){
         ts<-system.time(rs <- dbSendQuery(con, query))
@@ -162,11 +263,13 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
       cat("Size of results", object.size(results),"bytes \n")
 
       dbClearResult(rs)
-                                            
+     
+#      finish()
+                                       
       if (nrow(results)!=0){
         values<-as.double(unlist(results[parmod]))
         #convert values to other units
-        #values <- convertValues(values,par)
+        values <- convertValues(values,par)
         results[parmod] <- values
         levs <- results$lev
         if (length(levs)!=0){
