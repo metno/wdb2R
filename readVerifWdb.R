@@ -6,14 +6,15 @@
 #
 
 # Example of use:
-# connect to database
-# mydf<-readVerifWdb(c(1003),c(20120131,20120203),c("EC"),c("TT","P"), c(18,36))
-# mydf<-readVerifWdb(c(1493),c(20100131,20100203),c("EC","UM4"),c("FF","DD"), NULL)
-# mydf<-readVerifWdb(c(1317),c(1990128,19990130),c("H50","H10"),c("DD","FF"),prg=seq(3,21,3))
-# more calls to readVerifWdb
-# ....
+# connect to database:
+# > startup(user, host, database)
+# run queries:
+# > mydf<-readVerifWdb(c(1003),c(20120131,20120203),c("EC"),c("TT","P"), c(18,36))
+# > mydf<-readVerifWdb(c(1493),c(20100131,20100203),c("EC","UM4"),c("FF","DD"), NULL)
+# > mydf<-readVerifWdb(c(1317),c(1990128,19990130),c("H50","H10"),c("DD","FF"),prg=seq(3,21,3))
+# ... more calls to readVerifWdb ...
 # close connecion when finished
-# finish()
+# > finish()
 
 
 
@@ -96,14 +97,16 @@ finish<-function(){
 
 readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE){
 
+  if (!started){
+    cat("Please call startup(user, host, database) before using this function.\n")
+    return(FALSE)
+  }
+  
   if (length(wmo_no)!=1){
     cat("Length of wmo_no!=1\n")
     return()
   }
 
-  if (!startup())
-    return()
-  
   queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
   if (!is.null(lev))
     queryPart1 <- paste(queryPart1,",levelfrom as LEV")
@@ -191,8 +194,8 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
 
   if (!started){
-    startup()
-    started <<- TRUE
+    cat("Please call startup(user, host, database) before using this function.\n")
+    return(FALSE)
   }
   
   queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
@@ -239,8 +242,6 @@ readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
       
-      
-      startup()
       
       cat(query,"\n") 
       if (testLatency){
