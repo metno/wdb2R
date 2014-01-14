@@ -57,7 +57,7 @@ colnames(dataproviderDefinitions)<-c("dataprovider","shortmodelname")
 
 started <<-FALSE 
 
-startup<-function(){
+startup<-function(user, host, dbname){
   if (started)
     return(TRUE)
   if (!require(udunits2)) {
@@ -73,9 +73,6 @@ startup<-function(){
     return(FALSE)
   }
  #wdb stuff  
-  dbname <- "wdb"
-  user <- "wdb"
-  host <- "wdb-dev3"
   namespace <- "88,42,88"
  #startup; load driver, connect to wdb etc
   drv<<-dbDriver("PostgreSQL")

@@ -54,3 +54,6 @@ Examples of use
 #
 # find all proglenghts for station 1493,1/3-2010, parameter wind speed(FF), model Hirlam 8
 > findAvailableProglengths(1493,20100301,"FF","H8")
+
+
+# vi: se ft=markdown:
