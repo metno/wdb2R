@@ -191,79 +191,69 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
 
 
-readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,testMemory=FALSE,testLatency=FALSE){
+readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE){
 
   if (!started){
     cat("Please call startup(user, host, database) before using this function.\n")
     return(FALSE)
   }
   
-  queryPart1<-"select * from (select placename as WMO_NO, to_char(validtimefrom,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimefrom)  AS PROG"
-  if (!is.null(lev))
-    queryPart1 <- paste(queryPart1,",levelfrom as LEV")
-
-  maxmemory<<-0
   #create empty data frame to hold all models
   allmodels<-data.frame()
-# loop over models
+  
+
   for (mod in model){
     for (par  in prm){
 
-    # each model/parameter combo results in a dataframe with rows like this
-    # WMO_NO, TIME,PROG, TT.EC
-    # which are then merged together to something like
-    # WMO_NO, TIME,PROG, TT.EC TT.UM FF.EC FF.UM      
-   
-      modelString<-getDataProviderString(mod)
-      locationString <-"NULL"
-      if (useReftime){
-        reftimeString<-getInsideTimeString(period)
-        validtimeString<-"NULL"
-      } else{
-        reftimeString<-getInsideTimeString(period,subtracthours=300)
-        validtimeString<-getInsideTimeString(period)
-      }
-      parameterString<-getParameterString(par)
-      levelString<-getLevelString(par,lev)
-      versionString<-"NULL"
-      returnString<-"NULL::wci.returnfloat)"
-      init.timestring <- sprintf("%02i", init.time)
-      terminString <- paste("where to_char(referencetime,'HH24') in ('",init.timestring,"')",sep="")
-      whereString<-")AS wciquery where("
-      stationString<-paste("WMO_NO in('",paste(wmo_no,collapse="','"),"')",sep="")      
-      progString<-paste("AND PROG in(",paste(prg,collapse=","),") )",sep="")      
+  
+      query <- "
+SELECT
+        placename as WMO_NO, to_char(validtimeto,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG, value as PARMODELSTRING
+FROM
+        wci.floatvalue,
+        wci.dataprovidergroups g
+WHERE
+        validtimeto-referencetime in (PROGSTRING) AND
+        extract(hour from referencetime) in (0) AND
+        placename in (WMOSTRING) AND
+        valueparametername in (PARAMETERSTRING) AND
+        referencetime >= 'REFSTARTTIME' AND
+        referencetime <= 'REFENDTIME' AND
+        validtimeto >= 'VALIDSTARTTIME' AND
+        validtimefrom <= 'VALIDENDTIME' AND
+        dataprovidername=g.child AND
+        g.parent in (DATAPROVIDERSTRING) order by wmo_no,validtimeto"
       
+
       parmod <- paste(par,mod,sep=".")
-      parmodel<-paste("\"", parmod  ,"\"",sep="")
-      queryPart2<- paste(",value as",parmodel, "from wci.read(")
-      queryPart3<-paste(modelString,locationString,reftimeString,validtimeString,parameterString,levelString,versionString,returnString,sep=",")
-      queryPart4<-paste(terminString,whereString,stationString,progString,"order by TIME")
-
-      query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
-
+      parmodelString<-paste("\"", parmod  ,"\"",sep="")
+      query <- sub("PARMODELSTRING",parmodelString,query)
+      progString<-paste(paste("'",prg,"hours'",collapse=","))
+      query <- sub("PROGSTRING",progString,query)
+      wmoString<-paste(paste("'",wmo_no,"'",sep=""),collapse=",")
+      query <- sub("WMOSTRING",wmoString,query)
+      fstarttime<-getFormattedTime(period=period[1],subtracthours=max(prg))
+      fendtime<-getFormattedTime(period=period[2],addDay=TRUE)
+      query <- sub("REFSTARTTIME",fstarttime,query)
+      query <- sub("REFENDTIME",fendtime,query)
+      validstarttime<-getFormattedTime(period=period[1])
+      validendtime<-getFormattedTime(period=period[2],addDay=TRUE)
+      query <- sub("VALIDSTARTTIME",validstarttime,query)
+      query <- sub("VALIDENDTIME",validendtime,query)
+      dataprovider<-dataproviderDefinitions[dataproviderDefinitions$shortmodelname==mod,]$dataprovider
+      dataproviderstring<-paste("'",dataprovider,"'",sep="")
+      query <- sub("DATAPROVIDERSTRING",dataproviderstring,query)
+      pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==par,]
+      valueparametername <- as.character(pdef$valueparametername)
+      parameterstring<-paste("'",valueparametername,"'",sep="")
+      query <- sub("PARAMETERSTRING",parameterstring,query)
       
       
       cat(query,"\n") 
-      if (testLatency){
-        ts<-system.time(rs <- dbSendQuery(con, query))
-        tr<-system.time(results<-fetch(rs,n=-1))
-        cat("Time for rs <- dbSendQuery(con, query)\n")
-        print(ts)
-        cat("Time for results<-fetch(rs,n=-1)\n")
-        print(tr)
-      }
-      else{
-        rs <- dbSendQuery(con, query)
-        results<-fetch(rs,n=-1)
-      }
-
-      cat("Number of rows in results", nrow(results),"\n")
-      cat("Size of results", object.size(results),"bytes \n")
-
+      rs <- dbSendQuery(con, query)
+      results<-fetch(rs,n=-1)
       dbClearResult(rs)
-     
-#      finish()
-                                       
+
       if (nrow(results)!=0){
         values<-as.double(unlist(results[parmod]))
         #convert values to other units
@@ -275,41 +265,23 @@ readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init
           results$lev <- levs
         }
       }
-          
+      
       if (nrow(allmodels)==0){      
         allmodels<-results
       }
       else{
-        if (testLatency){
-          tm<-system.time(allmodels<-merge(allmodels,results))
-          cat("Time for allmodels<-merge(allmodels,results) \n")
-          print(tm)
-        }
-        else
-          if (nrow(results)!=0)      
+        if (nrow(results)!=0){      
           allmodels<-merge(allmodels,results)
+        }
+        
       }
 
-
-      #monitor memory usage
-      if (testMemory){
-        myobj<-sort( sapply(ls(),function(x){object.size(get(x))}), decreasing=TRUE)
-        totalmem<-sum(myobj)
-        cat("Total memory", totalmem,"bytes \n")
-        myobj<-head(myobj,5)
-        cat("5 largest objects:\n")
-        print(myobj)
-        if (totalmem > maxmemory)
-          maxmemory<<-totalmem
-      }
-      
-      
     }
- 
   }
+      
+  return(allmodels)  
 
   
-  return(allmodels)  
 }
 
 

@@ -17,10 +17,17 @@ Use
 ----
 
 > source("readVerifWdb.R")
+connect to database:
+> startup(user, host, database)
 
 The function
-readVerifWdb<-function(wmo_no,period,model,prm,prg,testMemory=false,testLatency=false)
+readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE)
 extracts data for the given station number, time periods, parameters, models and prognosis lengths.
+
+The function
+readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE)
+extracts data for the given station numbers, time periods, parameters, models and prognosis lengths.
+
 
 Output is an R.dataframe with a format similar to this
   wmo_no       time prog   DD.H8 FF.H8   TT.H8     P.H8  DD.UM4 FF.UM4   TT.UM4  P.UM4
@@ -34,6 +41,7 @@ call finish() to disconnect
 
 Examples of use
 ---------------
+> mydf<-readVerifWdbMultipleStations(c(1003,1317),c(20120128,20120130),c("H4","H12"),c("TT","P"),NULL)
 > mydf<-readVerifWdb(c(1317),c(20120128,20120130),c("H4","H12"),c("TT","P"),NULL)
 > mydf<-readVerifWdb(wmo_no=c(1492),period=c(20090801,20090805),model=c("EC","UM4","H12"),prm=c("FF","DD"),prg=c(3,6,9))
 > mydf<-readVerifWdb(c(1003),c(20120131,20120203),c("H8","EC"),c("TD","RR"), c(18,36))
