@@ -95,7 +95,7 @@ finish<-function(){
 }
 
 
-readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE){
+readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,verbose=TRUE){
 
   if (!started){
     cat("Please call startup(user, host, database) before using this function.\n")
@@ -151,12 +151,16 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
       
       query<-paste(queryPart1,queryPart2,queryPart3,queryPart4)
 
-      cat(query,"\n") 
+      if (verbose) {
+          cat(query,"\n") 
+      }
       rs <- dbSendQuery(con, query)
       results<-fetch(rs,n=-1)
  
-      cat("Number of rows in results", nrow(results),"\n")
-      cat("Size of results", object.size(results),"bytes \n")
+      if (verbose) {
+          cat("Number of rows in results", nrow(results),"\n")
+          cat("Size of results", object.size(results),"bytes \n")
+      }
 
       dbClearResult(rs)
      
