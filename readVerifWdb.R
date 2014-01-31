@@ -214,8 +214,8 @@ readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init
 SELECT
         placename as WMO_NO, to_char(validtimeto,'YYYYMMDDHH24') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG, value as PARMODELSTRING
 FROM
-        wci.floatvalue,
-        wci.dataprovidergroups g
+        vega.floatvalue,
+        vega.dataprovidergroups g
 WHERE
         validtimeto-referencetime in (PROGSTRING) AND
         extract(hour from referencetime) in (0) AND
