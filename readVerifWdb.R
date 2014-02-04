@@ -275,7 +275,7 @@ WHERE
       }
       else{
         if (nrow(results)!=0){      
-          allmodels<-merge(allmodels,results)
+          allmodels<-merge(allmodels,results,all=T)
         }
         
       }
