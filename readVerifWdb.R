@@ -195,7 +195,7 @@ readVerifWdb<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useRefti
 
 
 
-readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE){
+readVerifWdbMultipleStations<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,verbose=TRUE){
 
   if (!started){
     cat("Please call startup(user, host, database) before using this function.\n")
@@ -253,7 +253,9 @@ WHERE
       query <- sub("PARAMETERSTRING",parameterstring,query)
       
       
-      cat(query,"\n") 
+      if (verbose) {
+          cat(query,"\n") 
+      }
       rs <- dbSendQuery(con, query)
       results<-fetch(rs,n=-1)
       dbClearResult(rs)
