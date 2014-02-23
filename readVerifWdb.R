@@ -286,23 +286,18 @@ WHERE
 
 
 
-
 readVerifWdbCrosstab<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,verbose=TRUE){
 
   if (!started){
     cat("Please call startup(user, host, database) before using this function.\n")
     return(FALSE)
   }
+
   
-  #create empty data frame to hold all models
-  allmodels<-data.frame()
-  
-  for (mod in model){
-    
-    sourcequery <- "SELECT (placename||'',''||validtimefrom||'',''||wci.prognosishour(referencetime, validtimefrom)) as rowid,
-        placename as WMO_NO, to_char(validtimeto,''YYYYMMDDHH24'') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG, valueparametername, value QUERY order by rowid,valueparametername"      
-    catquery <- "select distinct valueparametername QUERY order by valueparametername"    
-    query <- "
+  sourcequery <- "SELECT (placename||'',''||validtimefrom||'',''||wci.prognosishour(referencetime, validtimefrom)) as rowid,
+        placename as WMO_NO, to_char(validtimeto,''YYYYMMDDHH24'') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG, (valueparametername||dataprovidername) as parmod, value QUERY order by rowid,parmod"      
+  catquery <- "select distinct (valueparametername||dataprovidername) as parmod  QUERY order by parmod"    
+  query <- "
 FROM
         vega.floatvalue,
         vega.dataprovidergroups g
@@ -317,103 +312,107 @@ WHERE
         validtimefrom <= ''VALIDENDTIME'' AND
         dataprovidername=g.child AND
         g.parent in (DATAPROVIDERSTRING)" 
-    
-    progString<-paste(paste("''",prg,"hours''",collapse=","))
-    query <- sub("PROGSTRING",progString,query)
-    wmoString<-paste(paste("''",wmo_no,"''",sep=""),collapse=",")
-    query <- sub("WMOSTRING",wmoString,query)
-    fstarttime<-getFormattedTime(period=period[1],subtracthours=max(prg))
-    fendtime<-getFormattedTime(period=period[2],addDay=TRUE)
-    query <- sub("REFSTARTTIME",fstarttime,query)
-    query <- sub("REFENDTIME",fendtime,query)
-    validstarttime<-getFormattedTime(period=period[1])
-    validendtime<-getFormattedTime(period=period[2],addDay=TRUE)
-    query <- sub("VALIDSTARTTIME",validstarttime,query)
-    query <- sub("VALIDENDTIME",validendtime,query)
-    dataprovider<-dataproviderDefinitions[dataproviderDefinitions$shortmodelname==mod,]$dataprovider
-    dataproviderstring<-paste("''",dataprovider,"''",sep="")
-    query <- sub("DATAPROVIDERSTRING",dataproviderstring,query)
-    valueparameternames<-vector()
-    for (par in prm){
-      pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==par,]
-      valueparametername <- as.character(pdef$valueparametername)
-      valueparameternames<-c(valueparameternames,valueparametername)
-    }
-    valueparameternames <- sort(valueparameternames)
-    parameterstring2<-paste(paste("''",valueparameternames,"''",sep=""),collapse=",")
-    parameterstring<-paste(paste("\"",valueparameternames,"\" float",sep=""),collapse=" ,")
-    query <- sub("PARAMETERSTRING",parameterstring2,query)
-              
-    
-      if (verbose) {
-          cat(query,"\n") 
-      }
-
-
-    crosstabquery <- "select * from crosstab('SOURCEQUERY','CATEGORY') as ct(ASCT)"
-    sourcequery <- sub("QUERY",query,sourcequery)
-    catquery <- sub("QUERY",query,catquery)     
-    asct_sql <- paste("rowid text,wmo_no text, time text, prog int,",parameterstring)      
-    crosstabquery <- sub("SOURCEQUERY",sourcequery,crosstabquery)
-    crosstabquery <- sub("ASCT",  asct_sql,crosstabquery)
-    crosstabquery <- sub("CATEGORY",  catquery,crosstabquery)
-      
-    
-    if (verbose) {
-      cat(crosstabquery,"\n\n") 
-    }
-
-    
-    rs <- dbSendQuery(con, crosstabquery)
-    results<-fetch(rs,n=-1)
-    dbClearResult(rs)
-
-    # remove first column from results, just used for crosstab
-    results<-results[,-1]
-      
-    mynames <- colnames(results)
-      if (nrow(results)!=0){
-        newresults<-data.frame(matrix(ncol=ncol(results),nrow=nrow(results)))
-        
-        # data values start at FIRSTDATACOLUMN (columns preceeding this one are wmo_no, time and prog).
-        FIRSTDATACOLUMN <- 4
-        
-        for (i in 1:ncol(results)){
-          if (i<FIRSTDATACOLUMN){
-            newresults[,i]=results[,i]
-            colnames(newresults)[i] <-mynames[i] 
-          } else{
-           # find corresponding miopdb parameter name
-            pdef <- parameterDefinitions[parameterDefinitions$valueparametername==mynames[i],]
-            # par is miopdb parameter name
-            par <- as.character(pdef$miopdb_par)
-            parmod <- paste(par,mod,sep=".")
-            #find which columm number to use (same order as requested in input)
-            addcol<-which(par==prm)[1]-1
-            colnumber <- FIRSTDATACOLUMN+addcol
-            colnames(newresults)[colnumber] <-parmod           
-            values<-as.double(unlist(results[,i]))
-            #convert values to other units
-            values <- convertValues(values,par)
-            newresults[,colnumber]=values
-          }
-        }
-      }
-
-      
-      if (nrow(allmodels)==0){      
-        allmodels<-newresults
-      }
-      else{
-        if (nrow(newresults)!=0){      
-          allmodels<-merge(allmodels,newresults,all=T)
-        }
-        
-      }
-
+  
+  progString<-paste(paste("''",prg,"hours''",collapse=","))
+  query <- sub("PROGSTRING",progString,query)
+  wmoString<-paste(paste("''",wmo_no,"''",sep=""),collapse=",")
+  query <- sub("WMOSTRING",wmoString,query)
+  fstarttime<-getFormattedTime(period=period[1],subtracthours=max(prg))
+  fendtime<-getFormattedTime(period=period[2],addDay=TRUE)
+  query <- sub("REFSTARTTIME",fstarttime,query)
+  query <- sub("REFENDTIME",fendtime,query)
+  validstarttime<-getFormattedTime(period=period[1])
+  validendtime<-getFormattedTime(period=period[2],addDay=TRUE)
+  query <- sub("VALIDSTARTTIME",validstarttime,query)
+  query <- sub("VALIDENDTIME",validendtime,query)
+  dataproviders<-vector()
+  for (mod in model){
+    dpdef<-dataproviderDefinitions[dataproviderDefinitions$shortmodelname==mod,]
+    dataprovider <- as.character(dpdef$dataprovider)
+    dataproviders <- c(dataproviders,dataprovider)
   }
+  print(model)
+  print(dataproviders)
+  dataproviderstring<-paste(paste("''",dataproviders,"''",sep=""),collapse=",")
+  query <- sub("DATAPROVIDERSTRING",dataproviderstring,query)
+  valueparameternames<-vector()
+  for (par in prm){
+    pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==par,]
+    valueparametername <- as.character(pdef$valueparametername)
+    valueparameternames<-c(valueparameternames,valueparametername)
+  }
+  valueparameternames <- sort(valueparameternames)
+  parameterstring<-paste(paste("''",valueparameternames,"''",sep=""),collapse=",")
+  query <- sub("PARAMETERSTRING",parameterstring,query)
+  
+  crosstabquery <- "select * from crosstab('SOURCEQUERY','CATEGORY') as ct(ASCT)"
+  sourcequery <- sub("QUERY",query,sourcequery)
+  catquery <- sub("QUERY",query,catquery)
+  dataproviders <- sort(dataproviders)
+  parameterstring <- ""
+
+  for (vp in valueparameternames){
+    subparameterstring<-paste(paste("\"",vp,".",dataproviders,"\" float",sep=""),collapse=" ,")
+    parameterstring <-paste(parameterstring,",",subparameterstring)
+  }
+
+  asct_sql <- paste("rowid text,wmo_no text, time text, prog int",parameterstring)      
+  crosstabquery <- sub("SOURCEQUERY",sourcequery,crosstabquery)
+  crosstabquery <- sub("ASCT",  asct_sql,crosstabquery)
+  crosstabquery <- sub("CATEGORY",  catquery,crosstabquery)
+  
+    
+  if (verbose) {
+    cat(crosstabquery,"\n\n") 
+  }
+
+  
+  rs <- dbSendQuery(con, crosstabquery)
+  results<-fetch(rs,n=-1)
+  dbClearResult(rs)
+
+  # remove first column from results, just used for crosstab
+  results<-results[,-1]
       
-  return(allmodels)  
+  if (nrow(results)!=0){
+    newresults<-data.frame(matrix(ncol=ncol(results),nrow=nrow(results)))
+    
+   # data values start at FIRSTDATACOLUMN (columns preceeding this one are wmo_no, time and prog).
+    FIRSTDATACOLUMN <- 4
+    parmodels <- vector()
+    for (i in model) parmodels<-c(parmodels,(paste(prm,i,sep=".")))
+    
+    for (i in 1:ncol(results)){
+      if (i<FIRSTDATACOLUMN){
+        newresults[,i]=results[,i]
+        colnames(newresults)[i] <-colnames(results)[i] 
+      } else{
+        # find corresponding miopdb parameter name
+        parameter.dataprovider <-colnames(results)[i]
+        pdsplit<- unlist(strsplit(parameter.dataprovider,"\\."))
+        parameter <- pdsplit[1]
+        dataprovider <- pdsplit[2]
+        pdef <- parameterDefinitions[parameterDefinitions$valueparametername==parameter,]
+        # par is miopdb parameter name
+        par <- as.character(pdef$miopdb_par)
+        #model
+        dpdef<-dataproviderDefinitions[dataproviderDefinitions$dataprovider==dataprovider,]
+        mod <- as.character(dpdef$shortmodelname)
+        parmod <- paste(par,mod,sep=".")
+        #find which columm number to use (same order as requested in input)
+        addcol<-which(parmod==parmodels)[1]-1
+        colnumber <- FIRSTDATACOLUMN+addcol
+        colnames(newresults)[colnumber] <-parmod           
+        values<-as.double(unlist(results[,i]))
+        #convert values to other units
+        values <- convertValues(values,par)
+        newresults[,colnumber]=values
+      }
+    }
+  }
+
+      
+  return(newresults)  
 
   
 }
