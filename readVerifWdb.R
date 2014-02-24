@@ -373,7 +373,8 @@ WHERE
 
   # remove first column from results, just used for crosstab
   results<-results[,-1]
-      
+
+  newresults<-data.frame()
   if (nrow(results)!=0){
     newresults<-data.frame(matrix(ncol=ncol(results),nrow=nrow(results)))
     
@@ -409,11 +410,12 @@ WHERE
         newresults[,colnumber]=values
       }
     }
+
+    
   }
 
-      
-  return(newresults)  
-
+  return(newresults)        
+  
   
 }
 
