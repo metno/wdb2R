@@ -23,7 +23,6 @@ DD<-c("DD","degrees","wind from direction","air pressure","height above ground",
 FF<-c("FF","m/s","wind speed","air pressure","height above ground","10","m/s")
 TT<-c("TT","celsius","air temperature","air pressure","height above ground","2","kelvin")
 TT_K<-c("TT_K","celsius","kalman air temperature","air pressure","height above ground","2","kelvin")
-TT.K<-c("TT.K","celsius","kalman air temperature","air pressure","height above ground","2","kelvin")
 TD<-c("TD","celsius","dew point temperature","air pressure","height above ground","2","kelvin")
 RR<-c("RR","mm","lwe thickness of precipitation amount","air pressure","height above ground","0","m")
 P<-c("P","hPa","air pressure at sea level",NA,"height above ground","0","Pa")
@@ -34,7 +33,7 @@ CL<-c("CL","%","cloud area fraction in atmosphere layer",NA,"air pressure","8500
 CM<-c("CM","%","cloud area fraction in atmosphere layer",NA,"air pressure","50000","%")
 UU<-c("UU","%","relative humidity","air pressure",NA,NA,"%")
 Z<-c("Z",NA,"atmosphere sigma coordinate","air pressure",NA,NA,NA)
-parameterDefinitions<-data.frame(rbind(DD,FF,TT,TT_K,TT.K,TD,RR,P,N,CH,FG,CL,CM,UU,Z))
+parameterDefinitions<-data.frame(rbind(DD,FF,TT,TT_K,TD,RR,P,N,CH,FG,CL,CM,UU,Z))
 colnames(parameterDefinitions)<-c("miopdb_par","miopdb_unit","valueparametername","levelparametername","groundlevelparametername","groundlevel","unit")
 
 NIVA<-c("NIVA","hPa","air pressure","Pa")
@@ -288,15 +287,71 @@ WHERE
 
 readVerifWdbCrosstab<-function(wmo_no,period,model,prm,prg,lev=NULL,init.time=0,useReftime=FALSE,verbose=TRUE){
 
+  results <- data.frame()
+  
   if (!started){
     cat("Please call startup(user, host, database) before using this function.\n")
     return(FALSE)
   }
 
+
+  # Make query to get results from 
+  crossfromquery <- getCrosstabFromQuery(wmo_no,period,model,prm,prg)
+
+  # Find the categories to sort into
+  crosscatquery <- "select distinct (valueparametername||'',''||levelfrom||'',''||dataprovidername) as parmod  QUERY order by parmod"    
+  crosscatquery <- sub("QUERY",crossfromquery,crosscatquery)
+
+  parameterstring <- getCrosstabParameterString(crosscatquery)
+  if (parameterstring=="")
+    return(results)
   
-  sourcequery <- "SELECT (placename||'',''||validtimefrom||'',''||wci.prognosishour(referencetime, validtimefrom)) as rowid,
-        placename as WMO_NO, to_char(validtimeto,''YYYYMMDDHH24'') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG, (valueparametername||dataprovidername) as parmod, value QUERY order by rowid,parmod"      
-  catquery <- "select distinct (valueparametername||dataprovidername) as parmod  QUERY order by parmod"    
+  sourcequery <- "SELECT (placename||'',''||validtimefrom||'',''||wci.prognosishour(referencetime, validtimefrom)) as rowid,placename as WMO_NO, to_char(validtimeto,''YYYYMMDDHH24'') as TIME, wci.prognosishour(referencetime, validtimeto) AS PROG,(valueparametername||'',''||levelfrom||'',''||dataprovidername) as parmod, value QUERY order by rowid,parmod"      
+
+  
+  sourcequery <- sub("QUERY",crossfromquery,sourcequery)  
+  crosstabquery <- "select * from crosstab('SOURCEQUERY','CATEGORY') as ct(ASCT)"
+  asct_sql <- paste("rowid text,wmo_no text, time text, prog int, ",parameterstring)      
+  crosstabquery <- sub("SOURCEQUERY",sourcequery,crosstabquery)
+  crosstabquery <- sub("ASCT",  asct_sql,crosstabquery)
+  crosstabquery <- sub("CATEGORY",  crosscatquery,crosstabquery)
+  
+  
+    if (verbose) {
+    cat(crosstabquery,"\n\n") 
+  }
+
+  rs <- dbSendQuery(con, crosstabquery)
+  results<-fetch(rs,n=-1)
+  dbClearResult(rs)
+
+  # remove first column from results, just used for crosstab
+  results<-results[,-1]
+  
+  if (nrow(results)==0)
+    return(results)
+  
+ # data values start at FIRSTDATACOLUMN (columns preceeding this one are wmo_no, time and prog).
+  FIRSTDATACOLUMN <- 4    
+  for (i in 1:ncol(results)){
+    if (i>=FIRSTDATACOLUMN){
+      values<-as.double(unlist(results[,i]))
+    #convert values to other units
+      parmod<-colnames(results)[i]
+      parmodsplit<- unlist(strsplit(parmod,"\\."))
+      par <- parmodsplit[1]
+      values <- convertValues(values,par)
+      results[,i]=values
+    }
+  }
+  
+
+  return(results)  
+  
+  
+}
+
+getCrosstabFromQuery <- function(wmo_no,period,model,prm,prg){
   query <- "
 FROM
         vega.floatvalue,
@@ -306,6 +361,7 @@ WHERE
         extract(hour from referencetime) in (0) AND
         placename in (WMOSTRING) AND
         valueparametername in (PARAMETERSTRING) AND
+        levelfrom in (LEVELSTRING) AND
         referencetime >= ''REFSTARTTIME'' AND
         referencetime <= ''REFENDTIME'' AND
         validtimeto >= ''VALIDSTARTTIME'' AND
@@ -326,13 +382,13 @@ WHERE
   query <- sub("VALIDSTARTTIME",validstarttime,query)
   query <- sub("VALIDENDTIME",validendtime,query)
   dataproviders<-vector()
+  groundlevels<-vector()
   for (mod in model){
     dpdef<-dataproviderDefinitions[dataproviderDefinitions$shortmodelname==mod,]
     dataprovider <- as.character(dpdef$dataprovider)
     dataproviders <- c(dataproviders,dataprovider)
   }
-  print(model)
-  print(dataproviders)
+
   dataproviderstring<-paste(paste("''",dataproviders,"''",sep=""),collapse=",")
   query <- sub("DATAPROVIDERSTRING",dataproviderstring,query)
   valueparameternames<-vector()
@@ -340,84 +396,53 @@ WHERE
     pdef <- parameterDefinitions[parameterDefinitions$miopdb_par==par,]
     valueparametername <- as.character(pdef$valueparametername)
     valueparameternames<-c(valueparameternames,valueparametername)
+    groundlevel <- as.character(pdef$groundlevel)
+    groundlevels <- c(groundlevels,groundlevel)
   }
-  valueparameternames <- sort(valueparameternames)
   parameterstring<-paste(paste("''",valueparameternames,"''",sep=""),collapse=",")
   query <- sub("PARAMETERSTRING",parameterstring,query)
-  
-  crosstabquery <- "select * from crosstab('SOURCEQUERY','CATEGORY') as ct(ASCT)"
-  sourcequery <- sub("QUERY",query,sourcequery)
-  catquery <- sub("QUERY",query,catquery)
-  dataproviders <- sort(dataproviders)
-  parameterstring <- ""
+  levelstring<-paste(paste("''",groundlevels,"''",sep=""),collapse=",")
+  query <- sub("LEVELSTRING",levelstring,query)
 
-  for (vp in valueparameternames){
-    subparameterstring<-paste(paste("\"",vp,".",dataproviders,"\" float",sep=""),collapse=" ,")
-    parameterstring <-paste(parameterstring,",",subparameterstring)
-  }
+  return(query)
+}
 
-  asct_sql <- paste("rowid text,wmo_no text, time text, prog int",parameterstring)      
-  crosstabquery <- sub("SOURCEQUERY",sourcequery,crosstabquery)
-  crosstabquery <- sub("ASCT",  asct_sql,crosstabquery)
-  crosstabquery <- sub("CATEGORY",  catquery,crosstabquery)
-  
-    
-  if (verbose) {
-    cat(crosstabquery,"\n\n") 
-  }
 
+
+
+  getCrosstabParameterString <- function(crosscatquery){
+  # substitute double quote with single to send query directly to db
+  catquery <- gsub("''","'",crosscatquery)
   
-  rs <- dbSendQuery(con, crosstabquery)
+  rs <- dbSendQuery(con, catquery)
   results<-fetch(rs,n=-1)
   dbClearResult(rs)
 
-  # remove first column from results, just used for crosstab
-  results<-results[,-1]
-
-  newresults<-data.frame()
-  if (nrow(results)!=0){
-    newresults<-data.frame(matrix(ncol=ncol(results),nrow=nrow(results)))
-    
-   # data values start at FIRSTDATACOLUMN (columns preceeding this one are wmo_no, time and prog).
-    FIRSTDATACOLUMN <- 4
-    parmodels <- vector()
-    for (i in model) parmodels<-c(parmodels,(paste(prm,i,sep=".")))
-    
-    for (i in 1:ncol(results)){
-      if (i<FIRSTDATACOLUMN){
-        newresults[,i]=results[,i]
-        colnames(newresults)[i] <-colnames(results)[i] 
-      } else{
-        # find corresponding miopdb parameter name
-        parameter.dataprovider <-colnames(results)[i]
-        pdsplit<- unlist(strsplit(parameter.dataprovider,"\\."))
-        parameter <- pdsplit[1]
-        dataprovider <- pdsplit[2]
-        pdef <- parameterDefinitions[parameterDefinitions$valueparametername==parameter,]
-        # par is miopdb parameter name
-        par <- as.character(pdef$miopdb_par)
-        #model
-        dpdef<-dataproviderDefinitions[dataproviderDefinitions$dataprovider==dataprovider,]
-        mod <- as.character(dpdef$shortmodelname)
-        parmod <- paste(par,mod,sep=".")
-        #find which columm number to use (same order as requested in input)
-        addcol<-which(parmod==parmodels)[1]-1
-        colnumber <- FIRSTDATACOLUMN+addcol
-        colnames(newresults)[colnumber] <-parmod           
-        values<-as.double(unlist(results[,i]))
-        #convert values to other units
-        values <- convertValues(values,par)
-        newresults[,colnumber]=values
-      }
+  parmods <- vector()
+  if (nrow(results)==0){
+      return("")
     }
-
-    
+  for (i in 1:nrow(results)){
+    rsplit<- unlist(strsplit(as.character(results[i,1]),","))
+    dataprovider <- rsplit[3]
+    dpdef<-dataproviderDefinitions[dataproviderDefinitions$dataprovider==dataprovider,]
+    mod <- as.character(dpdef$shortmodelname)
+    valueparametername <- rsplit[1]
+    level <- rsplit[2]
+    pdef <- parameterDefinitions[parameterDefinitions$valueparametername==valueparametername & parameterDefinitions$groundlevel==level,]  
+    # par is miopdb parameter name
+    par <- as.character(pdef$miopdb_par)
+    parmod <- paste(par,mod,sep=".")
+    parmods <- c(parmods,parmod)
   }
 
-  return(newresults)        
-  
-  
+  pms<-vector()
+  for (pm in parmods) pms<-c(pms,(paste("\"",pm,"\" float",sep="")))
+  parameterstring <- paste(pms,collapse=",")
+  return(parameterstring)
 }
+
+
 
 
 
